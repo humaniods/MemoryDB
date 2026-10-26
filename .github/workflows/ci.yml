@@ -1,0 +1,24 @@
+name: verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - run: python3 tests/smoke.py
+      - run: npm install --no-save playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/ui.cjs

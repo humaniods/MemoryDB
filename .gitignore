@@ -1,0 +1,13 @@
+/memorydb
+*.wal
+*.wal.*
+*.bak
+*.bak.sha256
+.env
+principals.json
+__pycache__/
+*.pyc
+*.egg-info/
+node_modules/
+package-lock.json
+coverage.out

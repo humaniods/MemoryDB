@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "sanyam-memorydb-client"
+version = "0.2.0"
+description = "Python client for the MemoryDB Go document and agent memory database"
+requires-python = ">=3.10"
+[tool.setuptools]
+py-modules = ["memorydb"]
