@@ -1,0 +1,13 @@
+{
+  "name": "sanyam-memorydb-client",
+  "version": "0.2.0",
+  "description": "Dependency-free Node client for the MemoryDB Go document and agent-memory database",
+  "type": "module",
+  "main": "index.mjs",
+  "types": "index.d.ts",
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.mjs" } },
+  "engines": { "node": ">=18" },
+  "files": ["index.mjs", "index.d.ts"],
+  "license": "MIT",
+  "scripts": { "test": "node test.mjs" }
+}

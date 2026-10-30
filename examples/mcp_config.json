@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memorydb": {
+      "command": "memorydb-mcp",
+      "env": {
+        "MEMORYDB_URL": "memorydb://REPLACE_WITH_YOUR_TOKEN@127.0.0.1:8080"
+      }
+    }
+  },
+  "_comment": "If you installed the wheel, memorydb-mcp is on PATH. From a clone use: \"command\": \"python3\", \"args\": [\"<path>/MemoryDB/sdk/memorydb_mcp.py\"]. Works with Claude Desktop, Qoder and any stdio MCP client."
+}

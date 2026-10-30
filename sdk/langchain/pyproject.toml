@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "memorydb-langchain"
+version = "0.2.0"
+description = "LangChain chat-message history backed by the MemoryDB agent-memory engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "humaniods" }]
+keywords = ["langchain", "agent-memory", "chat-history", "llm", "database"]
+classifiers = ["Development Status :: 4 - Beta", "Intended Audience :: Developers",
+               "Operating System :: POSIX", "Programming Language :: Python :: 3",
+               "Topic :: Scientific/Engineering :: Artificial Intelligence"]
+dependencies = ["sanyam-memorydb-client", "langchain-core>=0.2"]
+[tool.setuptools]
+packages = ["memorydb_langchain"]
+[project.urls]
+Homepage = "https://github.com/humaniods/MemoryDB"
+Repository = "https://github.com/humaniods/MemoryDB"
+Issues = "https://github.com/humaniods/MemoryDB/issues"
