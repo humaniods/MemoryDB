@@ -17,7 +17,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 from memorydb import MemoryDB  # noqa: E402
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "memorydb", "version": "0.2.0"}
+SERVER_INFO = {"name": "memorydb", "version": "0.2.1"}
 
 TOOL_DEFS = [
     {"name": "memorydb_health", "description": "Server status, identity and transaction sequence.",

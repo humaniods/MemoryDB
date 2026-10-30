@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(os.path.dirname(os.path.abspath(__file__))))
 from memorydb import MemoryDB, MemoryDBError  # noqa: E402
 
-SERVER_VERSION = "0.2.0"          # the release tag mdb serve downloads by default
+SERVER_VERSION = "0.2.1"          # the release tag mdb serve downloads by default
 REPO = "humaniods/MemoryDB"
 
 

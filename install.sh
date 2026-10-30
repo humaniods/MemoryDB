@@ -3,7 +3,7 @@
 # platform, an archive you already downloaded, or a build from the source tree.
 #
 #   ./install.sh                              # newest release binary for this OS/arch
-#   ./install.sh --from memorydb-0.2.0-linux-amd64.tar.gz
+#   ./install.sh --from memorydb-0.2.1-linux-amd64.tar.gz
 #   ./install.sh --source .                   # go build, no network
 #   MEMORYDB_DIST_BASE=file:///tmp/dist ./install.sh
 #
@@ -11,7 +11,7 @@
 # exposes on Unix. On Windows use WSL or the Docker image.
 set -euo pipefail
 
-version="${MEMORYDB_VERSION:-0.2.0}"
+version="${MEMORYDB_VERSION:-0.2.1}"
 repo="${MEMORYDB_REPO:-humaniods/MemoryDB}"
 prefix="${MEMORYDB_INSTALL_DIR:-$HOME/.local/bin}"
 dist_base="${MEMORYDB_DIST_BASE:-https://github.com/$repo/releases/download/v$version}"
@@ -129,5 +129,5 @@ Start it:
 Console at http://127.0.0.1:8080 — the token above is yours; keep it out of source control.
 If $prefix is not already on PATH: export PATH="$prefix:\$PATH"
 
-The Python client is a separate install: pip install ./sdk  (or the wheel from the release).
+The Python client is a separate install: pip install superb-memory  (or ./sdk from a clone).
 EOF

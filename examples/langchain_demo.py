@@ -1,6 +1,6 @@
 """LangChain chat history on MemoryDB.
 
-Setup: pip install sanyam-memorydb-client memorydb-langchain (or -e sdk/langchain from a clone)
+Setup: pip install superb-memory memorydb-langchain (or -e sdk/langchain from a clone)
 Run:   MEMORYDB_URL=memorydb://TOKEN@127.0.0.1:8080 python3 examples/langchain_demo.py
 """
 import os

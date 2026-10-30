@@ -18,12 +18,12 @@ on it (`undefined: lockPath`). On Windows use WSL or the Docker image.
 **Fastest path — pip only, no clone and no Go toolchain:**
 
 ```bash
-pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.0/sanyam_memorydb_client-0.2.0-py3-none-any.whl
+pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.1/superb_memory-0.2.1-py3-none-any.whl
 mdb serve      # fetches the release binary, checks its sha256, runs it
 ```
 
-Once the `sanyam-memorydb-client` name is live on PyPI the same two lines are
-`pip install sanyam-memorydb-client` and `mdb serve`.
+Once the `superb-memory` name is live on PyPI the same two lines are
+`pip install superb-memory` and `mdb serve`.
 
 `mdb serve` keeps everything under `~/.memorydb` (binary cache, journal, token) and prints
 the connection string before starting:
@@ -51,7 +51,7 @@ Server-only install, without the Python package:
 ```bash
 bash install.sh                    # newest release archive for this OS/CPU, sha256-checked
 bash install.sh --source .         # no release yet? build from this tree instead
-bash install.sh --from memorydb-0.2.0-linux-amd64.tar.gz
+bash install.sh --from memorydb-0.2.1-linux-amd64.tar.gz
 ```
 
 It installs to `~/.local/bin/memorydb` (override with `--prefix` or `MEMORYDB_INSTALL_DIR`)
@@ -90,18 +90,18 @@ Three distributions, one name on each index:
 
 | Package | What it gives you |
 |---|---|
-| `sanyam-memorydb-client` | `from memorydb import MemoryDB`, the `mdb` CLI and the `memorydb-mcp` stdio server |
+| `superb-memory` | `from memorydb import MemoryDB`, the `mdb` CLI and the `memorydb-mcp` stdio server |
 | `memorydb-django` | `CACHES` + `SESSION_ENGINE` backends |
 | `memorydb-langchain` | `MemoryDBChatMessageHistory` |
-| `sdk/node` (npm: `sanyam-memorydb-client`) | dependency-free Node 18+ client with types |
+| `sdk/node` (npm: `superb-memory`) | dependency-free Node 18+ client with types |
 
 ```bash
-V=https://github.com/humaniods/MemoryDB/releases/download/v0.2.0
-pip install $V/sanyam_memorydb_client-0.2.0-py3-none-any.whl    # client + mdb + memorydb-mcp
-pip install $V/memorydb_django-0.2.0-py3-none-any.whl           # CACHES + SESSION_ENGINE
-pip install $V/memorydb_langchain-0.2.0-py3-none-any.whl        # chat message history
+V=https://github.com/humaniods/MemoryDB/releases/download/v0.2.1
+pip install $V/superb_memory-0.2.1-py3-none-any.whl    # client + mdb + memorydb-mcp
+pip install $V/memorydb_django-0.2.1-py3-none-any.whl           # CACHES + SESSION_ENGINE
+pip install $V/memorydb_langchain-0.2.1-py3-none-any.whl        # chat message history
 
-pip install sanyam-memorydb-client memorydb-django memorydb-langchain   # once the PyPI names are live
+pip install superb-memory memorydb-django memorydb-langchain   # once the PyPI names are live
 ```
 
 The wheels come from the release itself, so they need no clone and no git; every one of
@@ -124,7 +124,7 @@ archive (`sha256 mismatch`) and one absent from `sha256sums.txt` are both refuse
 
 Published with v0.2.0: the server archives, the three wheels, `sha256sums.txt` and the
 `ghcr.io/humaniods/memorydb` image. Pending on the package indexes: `pip install
-sanyam-memorydb-client` by name, and `npm install sanyam-memorydb-client`. Both need a
+superb-memory` by name, and `npm install superb-memory`. Both need a
 one-time account setup — PyPI projects with Trusted Publishing for this repository plus the
 `PUBLISH_PYPI=true` repository variable, and an `NPM_TOKEN` secret plus `PUBLISH_NPM=true` —
 after which the release workflow's `pypi` and `npm` jobs do the upload on every tag.

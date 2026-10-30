@@ -1,6 +1,6 @@
 {
-  "name": "sanyam-memorydb-client",
-  "version": "0.2.0",
+  "name": "superb-memory",
+  "version": "0.2.1",
   "description": "Dependency-free Node client for the MemoryDB Go document and agent-memory database",
   "type": "module",
   "main": "index.mjs",

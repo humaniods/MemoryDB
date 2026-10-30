@@ -5,7 +5,7 @@
 ```bash
 # pip only - no clone, no Go toolchain: this wheel is the one attached to the release,
 # and `mdb serve` then fetches the server binary and verifies its sha256 before running it
-pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.0/sanyam_memorydb_client-0.2.0-py3-none-any.whl
+pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.1/superb_memory-0.2.1-py3-none-any.whl
 mdb serve
 #   connect: memorydb://TOKEN@127.0.0.1:8080   (data lives in ~/.memorydb/data/memory.wal)
 
@@ -15,7 +15,7 @@ docker run -d --name memorydb -p 127.0.0.1:8080:8080 \
   -v memorydb-data:/data ghcr.io/humaniods/memorydb:latest
 
 # Installed binary (fetches the release archive for your OS/CPU and checks its checksum)
-curl -fsSL https://raw.githubusercontent.com/humaniods/MemoryDB/v0.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/humaniods/MemoryDB/v0.2.1/install.sh | bash
 bash install.sh          # same script, from a clone: --source . builds instead of downloading
 export MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 memorydb -data memory.wal -worker
@@ -24,7 +24,7 @@ memorydb -data memory.wal -worker
 go build -o memorydb . && ./memorydb -data memory.wal -worker
 ```
 
-`pip install sanyam-memorydb-client` by name works as soon as the PyPI project is published
+`pip install superb-memory` by name works as soon as the PyPI project is published
 (see the release workflow's `pypi` job); until then the release wheel above is the install,
 and it is byte-for-byte what PyPI will serve. For a commit newer than the last tag, install
 from the repository instead:
@@ -55,12 +55,12 @@ Set it once: `export MEMORYDB_URL=memorydb://$MEMORYDB_TOKEN@127.0.0.1:8080`
 # curl
 curl -s -H "Authorization: Bearer $MEMORYDB_TOKEN" http://127.0.0.1:8080/api/v1/health/
 
-# CLI (pip install sanyam-memorydb-client provides `mdb`)
+# CLI (pip install superb-memory provides `mdb`)
 mdb health
 mdb memory add --kind fact --content "user ships on fridays"
 mdb search "fridays"
 
-# Python (pip install sanyam-memorydb-client)
+# Python (pip install superb-memory)
 python3 -c "
 from memorydb import MemoryDB
 db = MemoryDB()  # reads MEMORYDB_URL

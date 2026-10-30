@@ -30,7 +30,7 @@ var consoleUI []byte
 
 // Overridable with -ldflags "-X main.version=..." so a release build can stamp the
 // tag it was cut from, and `-version` can tell the operator which binary they have.
-var version = "0.2.0"
+var version = "0.2.1"
 
 type Principal struct {
 	TokenHash string `json:"token_sha256"`
@@ -566,7 +566,7 @@ func main() {
 		defer cancel()
 		server.Shutdown(shutdown)
 	}()
-	fmt.Printf("MemoryDB 0.2.0 listening on %s\n", *addr)
+	fmt.Printf("MemoryDB %s listening on %s\n", version, *addr)
 	if tls {
 		err = server.ListenAndServeTLS(*cert, *key)
 	} else {

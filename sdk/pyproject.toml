@@ -2,8 +2,8 @@
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
-name = "sanyam-memorydb-client"
-version = "0.2.0"
+name = "superb-memory"
+version = "0.2.1"
 description = "Python client, mdb CLI and MCP server for the MemoryDB Go document and agent memory database"
 readme = "README.md"
 requires-python = ">=3.10"

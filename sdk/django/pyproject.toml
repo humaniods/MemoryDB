@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "memorydb-django"
-version = "0.2.0"
+version = "0.2.1"
 description = "Django cache and session backends for MemoryDB (SQLite-style drop-in for the settings file)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,7 @@ keywords = ["django", "cache", "sessions", "database", "agent-memory"]
 classifiers = ["Development Status :: 4 - Beta", "Framework :: Django",
                "Intended Audience :: Developers", "Operating System :: POSIX",
                "Programming Language :: Python :: 3", "Topic :: Database"]
-dependencies = ["sanyam-memorydb-client", "Django>=4.2"]
+dependencies = ["superb-memory", "Django>=4.2"]
 [tool.setuptools]
 packages = ["memorydb_django"]
 [project.urls]

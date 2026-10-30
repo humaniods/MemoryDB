@@ -37,7 +37,7 @@ database can be obtained without cloning this tree. What was actually executed h
 | `uname` shim reporting `MINGW64_NT-10.0` | exits 1 with the WSL / `docker build` instructions before touching the filesystem |
 | `bash install.sh --help` | prints the four usage lines and exits 0 |
 | installed binary serving | `MemoryDB 0.2.0 listening on 127.0.0.1:8099`; `/api/v1/health/` returns `version: 0.2.0` with a bearer token and 401 without one |
-| `pip install ./sdk` in a fresh Python 3.10 venv | PASS — `sanyam_memorydb_client-0.2.0-py3-none-any.whl` built and installed; that venv's `memorydb` module (loaded from `site-packages`) created a collection and read back a record through the installed server |
+| `pip install ./sdk` in a fresh Python 3.10 venv | PASS — `superb_memory-0.2.0-py3-none-any.whl` built and installed; that venv's `memorydb` module (loaded from `site-packages`) created a collection and read back a record through the installed server |
 
 Not executed here: `install.sh`'s default GitHub-release fetch, `go install
 github.com/humaniods/MemoryDB@latest`, `pip install git+https://…#subdirectory=sdk` and

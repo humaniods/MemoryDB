@@ -1,6 +1,6 @@
 # MemoryDB Python client
 
-`sanyam-memorydb-client` gives you the Python client, the `mdb` command-line tool and the
+`superb-memory` gives you the Python client, the `mdb` command-line tool and the
 `memorydb-mcp` stdio server for [MemoryDB](https://github.com/humaniods/MemoryDB) — a single-binary
 Go document database that also stores AI-agent memory (facts with evidence, summaries, tool
 traces, hybrid BM25 + vector search).
@@ -8,7 +8,7 @@ traces, hybrid BM25 + vector search).
 ## One line to a running database
 
 ```bash
-pip install sanyam-memorydb-client
+pip install superb-memory
 mdb serve                    # fetches the server binary, starts it on 127.0.0.1:8080
 ```
 

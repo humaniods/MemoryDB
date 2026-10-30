@@ -1,4 +1,4 @@
-"""Python quickstart — pip install sanyam-memorydb-client, then MEMORYDB_URL=memorydb://TOKEN@host:8080 python3 examples/python_quickstart.py"""
+"""Python quickstart — pip install superb-memory, then MEMORYDB_URL=memorydb://TOKEN@host:8080 python3 examples/python_quickstart.py"""
 import os
 import sys
 import uuid
