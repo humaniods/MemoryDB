@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,44 @@ type Client struct {
 	URL   string
 	Token string
 	HTTP  *http.Client
+}
+
+// Connect parses a memorydb://TOKEN@host:port (or memorydbs:// for TLS) connection
+// string, the same form the Python and Node clients and the MEMORYDB_URL env var use.
+func Connect(raw string) (*Client, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "memorydb" && u.Scheme != "memorydbs" {
+		return nil, fmt.Errorf("connection string must start with memorydb:// or memorydbs://")
+	}
+	token := u.User.Username()
+	if token == "" {
+		return nil, fmt.Errorf("connection string must carry the token: memorydb://TOKEN@host:port")
+	}
+	host := u.Hostname()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := u.Port()
+	if port == "" {
+		port = "8080"
+	}
+	scheme := "http"
+	if u.Scheme == "memorydbs" {
+		scheme = "https"
+	}
+	return &Client{URL: scheme + "://" + host + ":" + port, Token: token}, nil
+}
+
+// ConnectEnv builds a client from the MEMORYDB_URL environment variable.
+func ConnectEnv() (*Client, error) {
+	raw := os.Getenv("MEMORYDB_URL")
+	if raw == "" {
+		return nil, fmt.Errorf("MEMORYDB_URL is not set")
+	}
+	return Connect(raw)
 }
 type Error struct {
 	Status  int

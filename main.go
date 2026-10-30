@@ -28,6 +28,10 @@ var ui []byte
 //go:embed console.html
 var consoleUI []byte
 
+// Overridable with -ldflags "-X main.version=..." so a release build can stamp the
+// tag it was cut from, and `-version` can tell the operator which binary they have.
+var version = "0.2.0"
+
 type Principal struct {
 	TokenHash string `json:"token_sha256"`
 	User      string `json:"user"`
@@ -198,7 +202,7 @@ func (s *Server) commit(w http.ResponseWriter, r *http.Request, rec Record, expe
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if path == "/api/v1/health/" && r.Method == "GET" {
-		respond(w, 200, map[string]any{"status": "ok", "workspace": s.workspace, "user": s.user, "role": s.role, "version": "0.2.0", "sequence": s.engine.Sequence()})
+		respond(w, 200, map[string]any{"status": "ok", "workspace": s.workspace, "user": s.user, "role": s.role, "version": version, "sequence": s.engine.Sequence()})
 		return
 	}
 	if path == "/api/v1/collections/" {
@@ -413,6 +417,7 @@ func (s *Server) recordRoute(w http.ResponseWriter, r *http.Request, old Record)
 			Version int            `json:"version"`
 			Set     map[string]any `json:"set"`
 			Unset   []string       `json:"unset"`
+			Inc     map[string]any `json:"inc"`
 		}
 		if err := decode(w, r, &req); err != nil {
 			fail(w, err)
@@ -420,6 +425,17 @@ func (s *Server) recordRoute(w http.ResponseWriter, r *http.Request, old Record)
 		}
 		if old.Kind != "document" {
 			fail(w, errors.New("PATCH supports document data"))
+			return
+		}
+		if len(req.Inc) > 0 {
+			// Increments re-read the live record under the engine lock, so an explicit
+			// version here would only make concurrent viewers retry each other.
+			rec, err := s.engine.Mutate(old.ID, req.Set, req.Unset, req.Inc)
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			respond(w, 200, rec)
 			return
 		}
 		if old.Data == nil {
@@ -478,7 +494,12 @@ func main() {
 	compact := flag.Int("compact", -1, "retain N revisions per record; 0=all; compact and exit")
 	worker := flag.Bool("worker", false, "run durable ingestion jobs")
 	verify := flag.Bool("verify", false, "verify journal and exit")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 	if *restore != "" {
 		if err := Restore(*restore, *path); err != nil {
 			log.Fatal(err)

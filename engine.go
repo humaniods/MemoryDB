@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
@@ -280,8 +281,151 @@ func id() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// zeroValue is what a widened schema hands the rows written before a field existed, the
+// same job SQLite's ALTER TABLE ADD COLUMN does with its default.
+func zeroValue(kind string) any {
+	switch kind {
+	case "string":
+		return ""
+	case "number", "integer":
+		return json.Number("0")
+	case "boolean":
+		return false
+	case "object":
+		return map[string]any{}
+	case "array":
+		return []any{}
+	}
+	return nil
+}
+
+// expandAlter turns a replaced collection record into the row rewrites that widening means,
+// so a new optional field is readable on every document instead of only on the ones written
+// after the change. A required field is refused: an ALTER has no value to supply for rows
+// that already exist, which is why Postgres insists on a DEFAULT for NOT NULL. Paths are
+// kept top level because nesting a missing object would invent data no one asked for.
+func (e *Engine) expandAlter(changes []Change, now time.Time) ([]Change, error) {
+	extra := []Change{}
+	for _, c := range changes {
+		if c.Record.Kind != "collection" || c.Expected < 1 || c.Record.Deleted {
+			continue
+		}
+		h := e.records[c.Record.ID]
+		if len(h) == 0 {
+			continue
+		}
+		old := h[len(h)-1]
+		if old.Deleted || old.Workspace != c.Record.Workspace {
+			continue
+		}
+		before, err := schemaOf(old)
+		if err != nil {
+			return nil, err
+		}
+		after, err := schemaOf(c.Record)
+		if err != nil {
+			return nil, err
+		}
+		added := []string{}
+		for path, field := range after.Fields {
+			if _, had := before.Fields[path]; had {
+				continue
+			}
+			if strings.Contains(path, ".") {
+				return nil, fmt.Errorf("an added field must be top level: %s", path)
+			}
+			if field.Required {
+				return nil, fmt.Errorf("required field %s cannot be added to a collection that has rows", path)
+			}
+			added = append(added, path)
+		}
+		if len(added) == 0 {
+			continue
+		}
+		sort.Strings(added)
+		for _, docHistory := range e.records {
+			r := docHistory[len(docHistory)-1]
+			if r.Kind != "document" || r.Collection != old.Collection || r.Workspace != old.Workspace ||
+				!active(r, now) {
+				continue
+			}
+			rec := clone(r)
+			if rec.Data == nil {
+				rec.Data = map[string]any{}
+			}
+			filled := false
+			for _, path := range added {
+				if _, present := rec.Data[path]; !present {
+					rec.Data[path] = zeroValue(after.Fields[path].Type)
+					filled = true
+				}
+			}
+			if filled {
+				extra = append(extra, Change{Record: rec, Expected: r.Version})
+			}
+		}
+	}
+	if len(extra) == 0 {
+		return changes, nil
+	}
+	if len(changes)+len(extra) > 256 {
+		return nil, errors.New("schema change touches too many rows for one transaction")
+	}
+	joined := make([]Change, 0, len(changes)+len(extra))
+	joined = append(joined, changes...)
+	return append(joined, extra...), nil
+}
+
 func (e *Engine) Put(r Record, expected int) (Record, error) {
 	rs, err := e.Batch([]Change{{r, expected}}, "")
+	if err != nil {
+		return Record{}, err
+	}
+	return rs[0], nil
+}
+
+// Mutate re-reads the live record and applies set, unset and inc in one locked
+// transaction, so a counter cannot lose a concurrent write the way a client-side
+// read-then-versioned-PATCH does. inc adds to a field a record is missing as if it
+// were zero, and refuses to add onto text.
+func (e *Engine) Mutate(id string, set map[string]any, unset []string, inc map[string]any) (Record, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	h := e.records[id]
+	if len(h) == 0 {
+		return Record{}, ErrMissing
+	}
+	old := h[len(h)-1]
+	if old.Deleted {
+		return Record{}, ErrMissing
+	}
+	rec := clone(old)
+	if rec.Data == nil {
+		rec.Data = map[string]any{}
+	}
+	for _, field := range unset {
+		delete(rec.Data, field)
+	}
+	for field, delta := range inc {
+		step, ok := number(delta)
+		if !ok {
+			return Record{}, fmt.Errorf("increment on %s must be a number", field)
+		}
+		current, exists := rec.Data[field]
+		if exists {
+			base, numeric := number(current)
+			if !numeric {
+				return Record{}, fmt.Errorf("cannot increment non-numeric field %s", field)
+			}
+			step = new(big.Rat).Add(base, step)
+		}
+		rec.Data[field] = rationalJSON(step)
+	}
+	for k, v := range set {
+		rec.Data[k] = v
+	}
+	rs, err := e.batchLocked([]Change{{rec, old.Version}}, "")
 	if err != nil {
 		return Record{}, err
 	}
@@ -320,9 +464,12 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 	for k, v := range e.records {
 		candidate[k] = v
 	}
+	now := time.Now().UTC()
+	if changes, err = e.expandAlter(changes, now); err != nil {
+		return nil, err
+	}
 	prepared := make([]Record, 0, len(changes))
 	touched := map[string]bool{}
-	now := time.Now().UTC()
 	for _, change := range changes {
 		r := clone(change.Record)
 		if err = valid(r); err != nil {

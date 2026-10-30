@@ -53,12 +53,26 @@ with tempfile.TemporaryDirectory() as td:
         expect_status(409, lambda: users.all().page(cursor=page['next_cursor'],limit=1))
         users.delete(pk=a['id'],version=2)
         expect_status(404,lambda: users.get(pk=a['id']))
+        # Widen a live collection the way ALTER TABLE ADD COLUMN does, then prove the new field
+        # is queryable and that a schema the current rows cannot satisfy is refused.
+        db.collections.alter('users', fields={'nickname':{'type':'string'}}, indexes=['nickname'])
+        users.create(email='n@example.com', nickname='Nina')
+        assert users.filter(nickname__icontains='nin').first()['data']['email']=='n@example.com'
+        expect_status(409, lambda: db.collections.alter('users', fields={'nickname':{'type':'integer'}}))
+        expect_status(404, lambda: db.collections.alter('nowhere', fields={'tag':{'type':'string'}}))
+        try:
+            db.collections.alter('users', fields={'tag':{'type':'string','required':True}}); raise AssertionError('rows without tag should block a required field')
+        except MemoryDBError as e: assert e.status in (400,409), e.status
+        assert {r['data'].get('nickname') for r in users.all()} >= {'Nina'}
         results=db.ingest([{'role':'user','content':'I prefer Hindi'}],facts=[{'subject':'me','predicate':'language','value':'Hindi','quote':'I prefer Hindi','message_index':0,'confidence':1}])
         assert {r['kind'] for r in results} >= {'chat','fact','summary'}
         job=db.queue_ingest(messages=[{'role':'user','content':'Queued conversation'}])
         assert db.request('POST',f"jobs/{job['id']}/run/",{})['metadata']['status']=='done'
         p.terminate();p.wait(timeout=5);p=start()
-        assert users.all().count()==2
+        assert users.all().count()==3
+        # The widened schema is part of the journal, not a client-side wish.
+        assert db.collections.schema('users')['data']['fields']['nickname']['type']=='string'
+        assert users.filter(nickname='Nina').count()==1
         backup=td+'/snapshot.bak';p.terminate();p.wait(timeout=5)
         for extra in (['-verify'],['-backup',backup],['-compact','1'],['-verify']):
             subprocess.run([binary,'-data',td+'/test.wal',*extra],check=True,capture_output=True)

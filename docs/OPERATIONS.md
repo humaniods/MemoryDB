@@ -1,5 +1,37 @@
 # Operations
 
+## Install and upgrade
+
+Three ways to get the server onto a machine, all of which produce the same static binary:
+
+```bash
+bash install.sh                                # release archive for this OS/CPU, sha256-checked
+bash install.sh --source /path/to/MemoryDB    # build from the tree with Go 1.24+
+docker build -t memorydb /path/to/MemoryDB     # container image, UI files included
+```
+
+`install.sh` writes to `~/.local/bin/memorydb` (`--prefix`, or `MEMORYDB_INSTALL_DIR`),
+refuses an archive whose SHA256 does not match the release's `sha256sums.txt`, and prints a
+start command with a token it generated for you. `build-dist.sh` is what a release runs to
+produce those archives; pointing `--dist-base` at its output directory (`file:///…` or a plain
+path) installs from disk, which is how the installer is tested without a published release.
+
+Upgrading replaces the binary, never the data. Stop the server, then:
+
+```bash
+./memorydb -data memory.wal -verify                        # journal readable before you start
+./memorydb -data memory.wal -backup memory-before.bak       # keeps its .sha256 sidecar
+install.sh --version 0.3.0
+```
+
+The WAL format is versioned inside the file (`format: 2` frames), so an older journal starts
+under a newer binary; a newer journal does not go back. Keep the backup next to its
+`.sha256` sidecar and check it before relying on it.
+
+Windows has no native build. The single-writer guarantee comes from `syscall.Flock`, which Go
+implements only on Unix (`lock_unix.go`, `//go:build linux || darwin || freebsd`), and a
+`GOOS=windows` compile fails on `undefined: lockPath`. Run it in WSL, or as a container.
+
 ## Authentication and deployment
 
 `MEMORYDB_TOKEN` creates a local admin in workspace `default`, user `local-user`.

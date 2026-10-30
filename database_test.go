@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -97,7 +98,7 @@ func TestQueryIndexesPaginationAndExactNumbers(t *testing.T) {
 	if p.Results[0].Data["age"].(json.Number) != "9007199254740993" {
 		t.Fatal("integer precision lost")
 	}
-	q = DocumentQuery{OrderBy: "age", Limit: 1}
+	q = DocumentQuery{OrderBy: Order{{Field: "age"}}, Limit: 1}
 	p, err = e.Documents("u", "w", "users", q)
 	if err != nil || p.Results[0].Data["age"].(json.Number) != "7" || p.Next == "" {
 		t.Fatal(p, err)
@@ -113,6 +114,398 @@ func TestQueryIndexesPaginationAndExactNumbers(t *testing.T) {
 	}
 	if _, err = e.Documents("u", "w", "users", DocumentQuery{Where: []Predicate{{"age", "exists", "yes"}}}); err == nil {
 		t.Fatal("invalid predicate accepted")
+	}
+}
+func TestOrNotAndCaseInsensitiveQueries(t *testing.T) {
+	e, _ := setupDocuments(t)
+	// age carries the view count here; name is undeclared, allowed because the schema is not strict.
+	member := func(email, name string, views json.Number) Record {
+		r := document(email, views)
+		r.Data["name"] = name
+		return r
+	}
+	for _, r := range []Record{
+		member("a@x.com", "Univorya", "7"),
+		member("b@x.com", "Memories", "3"),
+		member("c@x.com", "Other", "1"),
+	} {
+		if _, err := e.Put(r, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Login lookup: any one field can identify the account.
+	page, err := e.Documents("u", "w", "users", DocumentQuery{Or: [][]Predicate{
+		{{"email", "eq", "b@x.com"}}, {{"name", "eq", "Memories"}},
+	}})
+	if err != nil || page.Total != 1 || page.Results[0].Data["email"] != "b@x.com" {
+		t.Fatal(page, err)
+	}
+	// Search: free text across fields, still narrowed by the ANDed Where clause.
+	page, err = e.Documents("u", "w", "users", DocumentQuery{
+		Where: []Predicate{{"age", "gte", json.Number("3")}},
+		Or:    [][]Predicate{{{"name", "contains", "emo"}}, {{"name", "contains", "niv"}}},
+	})
+	if err != nil || page.Total != 2 {
+		t.Fatal(page, err)
+	}
+	page, err = e.Documents("u", "w", "users", DocumentQuery{Not: []Predicate{{"email", "eq", "a@x.com"}}})
+	if err != nil || page.Total != 2 {
+		t.Fatal(page, err)
+	}
+	page, err = e.Documents("u", "w", "users", DocumentQuery{Where: []Predicate{{"email", "iequals", "A@X.com"}}})
+	if err != nil || page.Total != 1 {
+		t.Fatal(page, err)
+	}
+	if err := validateQuery(DocumentQuery{Or: [][]Predicate{{}}}); err == nil {
+		t.Fatal("empty or group accepted")
+	}
+	if err := validateQuery(DocumentQuery{Or: [][]Predicate{{{"", "eq", "x"}}}}); err == nil {
+		t.Fatal("or group with empty field accepted")
+	}
+	if err := validateQuery(DocumentQuery{Not: []Predicate{{"email", "nope", "x"}}}); err == nil {
+		t.Fatal("unknown operator in not accepted")
+	}
+}
+
+func TestCaseInsensitiveContainsMatchesSQLiteLike(t *testing.T) {
+	data := map[string]any{"title": "UniVorya Platform", "tags": []any{"Python", "FastAPI"}}
+	// SQLite LIKE is case-insensitive for ASCII, so platform search must be too.
+	if !matches(data, []Predicate{{"title", "icontains", "univory"}}) {
+		t.Fatal("icontains should fold case on strings")
+	}
+	if !matches(data, []Predicate{{"title", "contains", "Vory"}}) {
+		t.Fatal("contains lost exact substring behaviour")
+	}
+	if matches(data, []Predicate{{"title", "contains", "univory"}}) {
+		t.Fatal("contains became case-insensitive")
+	}
+	if !matches(data, []Predicate{{"tags", "icontains", "fastapi"}}) {
+		t.Fatal("icontains should fold case on array members")
+	}
+	if !matches(data, []Predicate{{"tags", "contains", "Python"}}) {
+		t.Fatal("array membership lost")
+	}
+	if matches(data, []Predicate{{"tags", "contains", "pyth"}}) {
+		t.Fatal("array contains became substring")
+	}
+	if matches(data, []Predicate{{"missing", "icontains", "x"}}) {
+		t.Fatal("icontains matched absent field")
+	}
+}
+func TestAggregationsCoverFullFilteredSet(t *testing.T) {
+	e, _ := setupDocuments(t)
+	seed := []Record{
+		document("a@x.com", json.Number("10")),
+		document("b@x.com", json.Number("20")),
+		document("c@x.com", json.Number("30")),
+		document("d@x.com", nil),
+		document("e@x.com", json.Number("9007199254740993")),
+	}
+	for i, r := range seed {
+		r.Data["team"] = []string{"alpha", "alpha", "beta", "delta", "gamma"}[i]
+		if r.Data["age"] == nil {
+			delete(r.Data, "age")
+		}
+		if _, err := e.Put(r, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	total := DocumentQuery{Aggregate: []Aggregation{
+		{Fn: "sum", Field: "age"}, {Fn: "avg", Field: "age"},
+		{Fn: "min", Field: "age"}, {Fn: "max", Field: "age"},
+	}}
+	page, err := e.Documents("u", "w", "users", total)
+	if err != nil || len(page.Groups) != 1 {
+		t.Fatal(page, err)
+	}
+	got := page.Groups[0].Values
+	// 10+20+30+2^53+1 must not round through a float64.
+	if got["sum_age"] != json.Number("9007199254741053") {
+		t.Fatal("sum lost precision:", got["sum_age"])
+	}
+	// An exact quarter stays exact rather than becoming 2251799813685263.2.
+	if got["avg_age"] != json.Number("2251799813685263.25") {
+		t.Fatal("avg rounded:", got["avg_age"])
+	}
+	if got["min_age"] != json.Number("10") || got["max_age"] != json.Number("9007199254740993") {
+		t.Fatal("min/max wrong:", got)
+	}
+	if page.Groups[0].Count != 5 {
+		t.Fatal("count should cover all five records:", page.Groups[0].Count)
+	}
+
+	// A page of one still aggregates every matching record.
+	page, err = e.Documents("u", "w", "users", DocumentQuery{
+		Aggregate: []Aggregation{{Fn: "sum", Field: "age"}}, Limit: 1,
+	})
+	if err != nil || len(page.Results) != 1 || page.Groups[0].Values["sum_age"] != json.Number("9007199254741053") {
+		t.Fatal("pagination skewed the total", page, err)
+	}
+
+	grouped, err := e.Documents("u", "w", "users", DocumentQuery{
+		GroupBy:   []string{"team"},
+		Aggregate: []Aggregation{{Fn: "sum", Field: "age"}, {Fn: "max", Field: "age", As: "top"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(grouped.Groups) != 4 {
+		t.Fatalf("expected four groups, got %d", len(grouped.Groups))
+	}
+	for i, want := range []string{"alpha", "beta", "delta", "gamma"} {
+		g := grouped.Groups[i]
+		if g.Group["team"] != want {
+			t.Fatalf("groups not ordered deterministically: %v", grouped.Groups)
+		}
+		if want == "delta" {
+			// SQL SUM over rows with no value is NULL, not zero.
+			if g.Count != 1 || g.Values["sum_age"] != nil {
+				t.Fatal("empty group should report null:", g)
+			}
+			continue
+		}
+		if g.Values["sum_age"] == nil {
+			t.Fatal("group sum missing:", g)
+		}
+	}
+	if grouped.Groups[0].Values["top"] != json.Number("20") {
+		t.Fatal("as alias not applied:", grouped.Groups[0])
+	}
+
+	// Narrower filters must narrow the aggregate too.
+	narrow, err := e.Documents("u", "w", "users", DocumentQuery{
+		Where:     []Predicate{{"team", "eq", "alpha"}},
+		Aggregate: []Aggregation{{Fn: "sum", Field: "age"}},
+	})
+	if err != nil || narrow.Groups[0].Values["sum_age"] != json.Number("30") {
+		t.Fatal("aggregate ignored where:", narrow, err)
+	}
+
+	for _, bad := range []DocumentQuery{
+		{Aggregate: []Aggregation{{Fn: "median", Field: "age"}}},
+		{Aggregate: []Aggregation{{Fn: "sum", Field: ""}}},
+		{Aggregate: []Aggregation{{Fn: "sum", Field: "age"}, {Fn: "sum", Field: "age"}}},
+		{Aggregate: []Aggregation{{Fn: "sum", Field: "age", As: "9bad"}}},
+		{GroupBy: []string{""}},
+	} {
+		if _, err := e.Documents("u", "w", "users", bad); err == nil {
+			t.Fatal("invalid aggregate accepted:", bad)
+		}
+	}
+	if _, err := e.Documents("u", "w", "users", DocumentQuery{}); err != nil {
+		t.Fatal("plain query broke:", err)
+	}
+	page, _ = e.Documents("u", "w", "users", DocumentQuery{})
+	if page.Groups != nil {
+		t.Fatal("plain query returned aggregates")
+	}
+}
+func TestAtomicIncrementSurvivesConcurrency(t *testing.T) {
+	e, _ := setupDocuments(t)
+	// views is undeclared, so this also covers incrementing a field a record lacks:
+	// it has to start from zero rather than fail.
+	created, err := e.Put(document("a@x.com", json.Number("1")), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const viewers = 64
+	var wg sync.WaitGroup
+	for i := 0; i < viewers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := e.Mutate(created.ID, nil, nil, map[string]any{"views": json.Number("1")}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	page, err := e.Documents("u", "w", "users", DocumentQuery{Where: []Predicate{{"email", "eq", "a@x.com"}}})
+	if err != nil || page.Total != 1 {
+		t.Fatal(page, err)
+	}
+	got := page.Results[0].Data
+	// Read-modify-write from the client would drop most of these; nobody may be lost.
+	if got["views"] != json.Number(fmt.Sprint(viewers)) {
+		t.Fatal("lost updates:", got["views"])
+	}
+	if got["age"] != json.Number("1") {
+		t.Fatal("increment disturbed another field:", got)
+	}
+	if page.Results[0].Version != viewers+1 {
+		t.Fatal("version did not advance once per write:", page.Results[0].Version)
+	}
+
+	// Negative steps, big exact integers, and a declared numeric field.
+	if _, err = e.Mutate(created.ID, nil, nil, map[string]any{"views": json.Number("-4"), "age": json.Number("2")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Mutate(created.ID, nil, nil, map[string]any{"age": json.Number("9007199254740991")}); err != nil {
+		t.Fatal(err)
+	}
+	page, _ = e.Documents("u", "w", "users", DocumentQuery{Where: []Predicate{{"email", "eq", "a@x.com"}}})
+	got = page.Results[0].Data
+	if got["views"] != json.Number("60") || got["age"] != json.Number("9007199254740994") {
+		t.Fatal("inc wrong:", got)
+	}
+
+	// Refusing to add onto text, and reporting the missing record honestly.
+	if _, err = e.Mutate(created.ID, nil, nil, map[string]any{"email": json.Number("1")}); err == nil {
+		t.Fatal("increment onto a string accepted")
+	}
+	if _, err = e.Mutate(created.ID, nil, nil, map[string]any{"views": "3"}); err == nil {
+		t.Fatal("non-numeric step accepted")
+	}
+	if _, err = e.Mutate("00000000000000000000000000000000", nil, nil, map[string]any{"views": json.Number("1")}); !errors.Is(err, ErrMissing) {
+		t.Fatal("unknown id:", err)
+	}
+	// set and unset still ride along in the same locked write.
+	if _, err = e.Mutate(created.ID, map[string]any{"stage": "Beta"}, []string{"views"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	page, _ = e.Documents("u", "w", "users", DocumentQuery{Where: []Predicate{{"email", "eq", "a@x.com"}}})
+	got = page.Results[0].Data
+	if got["stage"] != "Beta" {
+		t.Fatal("set not applied:", got)
+	}
+	if _, present := got["views"]; present {
+		t.Fatal("unset not applied:", got)
+	}
+}
+func TestCaseInsensitiveUniqueFields(t *testing.T) {
+	e, _ := openTest(t)
+	acc := Record{Kind: "collection", Collection: "accounts", User: "u", Workspace: "w", Content: "accounts", Visibility: "team",
+		Data: map[string]any{"fields": map[string]any{
+			"email":  map[string]any{"type": "string", "required": true, "casefold": true},
+			"handle": map[string]any{"type": "string", "required": true},
+		}, "unique": []any{"email", "handle"}}}
+	if _, err := e.Put(acc, 0); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(email, handle string) Record {
+		return Record{Kind: "document", Collection: "accounts", User: "u", Workspace: "w",
+			Data: map[string]any{"email": email, "handle": handle}}
+	}
+	if _, err := e.Put(mk("Priya@x.com", "priya"), 0); err != nil {
+		t.Fatal(err)
+	}
+	// The same identity in other casing must not open a second account.
+	if _, err := e.Put(mk("PRIYA@x.com", "other"), 0); !errors.Is(err, ErrConflict) {
+		t.Fatal("casefold unique not enforced:", err)
+	}
+	// A field without casefold keeps SQLite's case-exact unique behaviour.
+	if _, err := e.Put(mk("a@x.com", "Priya"), 0); err != nil {
+		t.Fatal("case-sensitive unique wrongly rejected a new handle:", err)
+	}
+	badSchema := Record{Kind: "collection", Collection: "badcols", User: "u", Workspace: "w", Content: "badcols", Visibility: "team",
+		Data: map[string]any{"fields": map[string]any{"n": map[string]any{"type": "integer", "casefold": true}}, "unique": []any{"n"}}}
+	if _, err := e.Put(badSchema, 0); err == nil {
+		t.Fatal("casefold on a non-string field accepted")
+	}
+	page, err := e.Documents("u", "w", "accounts", DocumentQuery{})
+	if err != nil || page.Total != 2 {
+		t.Fatal("rejected write left a record behind:", page, err)
+	}
+	// Folding affects uniqueness only; matching stays explicit about which operator folds.
+	page, err = e.Documents("u", "w", "accounts", DocumentQuery{Where: []Predicate{{"email", "iequals", "priya@x.com"}}})
+	if err != nil || page.Total != 1 {
+		t.Fatal("iequals did not find the folded account:", page, err)
+	}
+	page, _ = e.Documents("u", "w", "accounts", DocumentQuery{Where: []Predicate{{"email", "eq", "priya@x.com"}}})
+	if page.Total != 0 {
+		t.Fatal("eq became case-insensitive")
+	}
+}
+func TestMultiColumnSortAndOffsetPaging(t *testing.T) {
+	e, _ := setupDocuments(t)
+	// The listing sort univorya needs: most-liked, then most-viewed, then newest.
+	seed := []struct {
+		email        string
+		likes, views string
+		created      string
+	}{
+		{"a@x.com", "5", "100", "2026-01-01"},
+		{"b@x.com", "5", "100", "2026-02-01"},
+		{"c@x.com", "5", "90", "2026-03-01"},
+		{"d@x.com", "9", "1", "2026-04-01"},
+		{"e@x.com", "0", "500", "2026-05-01"},
+	}
+	ids := map[string]string{}
+	for _, r := range seed {
+		rec := document(r.email, nil)
+		delete(rec.Data, "age")
+		rec.Data["likes"] = json.Number(r.likes)
+		rec.Data["views"] = json.Number(r.views)
+		rec.Data["created"] = r.created
+		created, err := e.Put(rec, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[r.email] = created.ID
+	}
+	trending := Order{
+		{Field: "likes", Descending: true},
+		{Field: "views", Descending: true},
+		{Field: "created", Descending: true},
+	}
+	pages := [][]string{{"d@x.com", "b@x.com"}, {"a@x.com", "c@x.com"}, {"e@x.com"}}
+	for page, want := range pages {
+		got, err := e.Documents("u", "w", "users", DocumentQuery{OrderBy: trending, Limit: 2, Offset: page * 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Total != 5 {
+			t.Fatal("offset changed the total:", got.Total)
+		}
+		if len(got.Results) != len(want) {
+			t.Fatalf("page %d has %d rows, want %d", page, len(got.Results), len(want))
+		}
+		for i, r := range got.Results {
+			if r.Data["email"] != want[i] {
+				t.Fatalf("page %d order: got %v want %v", page, got.Results, want)
+			}
+		}
+	}
+	// A view landing between page fetches must not knock the reader off page 3. A cursor
+	// would refuse the very same request with 409, which is why the UI pages by offset.
+	if _, err := e.Mutate(ids["d@x.com"], nil, nil, map[string]any{"views": json.Number("1")}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := e.Documents("u", "w", "users", DocumentQuery{OrderBy: trending, Limit: 2, Offset: 2})
+	if err != nil || len(after.Results) != 2 || after.Results[0].Data["email"] != "a@x.com" {
+		t.Fatal("offset paging broke after a write", after, err)
+	}
+	// A page number past the last row answers "nothing", the way LIMIT/OFFSET does in
+	// Postgres and SQLite; the total still describes the whole filtered set.
+	past, err := e.Documents("u", "w", "users", DocumentQuery{OrderBy: trending, Limit: 2, Offset: 5})
+	if err != nil || len(past.Results) != 0 || past.Total != 5 || past.Next != "" {
+		t.Fatal("offset beyond the last row should be an empty page", past, err)
+	}
+	first, err := e.Documents("u", "w", "users", DocumentQuery{OrderBy: trending, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Documents("u", "w", "users", DocumentQuery{OrderBy: trending, Limit: 2, Cursor: first.Next}); err != nil {
+		t.Fatal("cursor stopped working", err)
+	}
+
+	for _, bad := range []DocumentQuery{
+		{Limit: 2, Offset: 2, Cursor: "anything"},
+		{OrderBy: Order{{Field: "likes"}, {Field: "views"}, {Field: "created"}, {Field: "email"}, {Field: "likes"}}},
+		{OrderBy: Order{{Field: "likes", Descending: true}, {Field: "views"}}, Descending: true},
+		{OrderBy: Order{{Field: "likes"}, {Field: "likes"}}},
+		{OrderBy: Order{{Field: ""}}},
+		{Offset: -1},
+		{Aggregate: []Aggregation{{Fn: "nope", Field: "views"}}},
+	} {
+		if _, err := e.Documents("u", "w", "users", bad); err == nil {
+			t.Fatal("invalid query accepted:", bad)
+		}
+	}
+	// The string form keeps its old meaning, descending included.
+	newest, err := e.Documents("u", "w", "users", DocumentQuery{OrderBy: Order{{Field: "created"}}, Descending: true, Limit: 1})
+	if err != nil || len(newest.Results) != 1 || newest.Results[0].Data["email"] != "e@x.com" {
+		t.Fatal("legacy single-field descending sort broke", newest, err)
 	}
 }
 func TestMissingNullAndPredicateTypes(t *testing.T) {
@@ -474,7 +867,7 @@ func TestPaginationRejectsExpiryAndMixedSort(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Put(document("b", 2), 0)
-	q := DocumentQuery{OrderBy: "age", Limit: 1}
+	q := DocumentQuery{OrderBy: Order{{Field: "age"}}, Limit: 1}
 	p, err := e.Documents("u", "w", "users", q)
 	if err != nil || p.Next == "" {
 		t.Fatal(p, err)
@@ -518,5 +911,57 @@ func TestEmptyDocumentAndMalformedJob(t *testing.T) {
 	s := &Server{engine: e, user: "u", workspace: "w", role: "admin"}
 	if _, err = s.runJob(context.Background(), job.ID); err == nil {
 		t.Fatal("invalid ingest job succeeded")
+	}
+}
+func TestAlterCollectionBackfillsExistingRows(t *testing.T) {
+	e, _ := openTest(t)
+	made, err := e.Put(Record{Kind: "collection", Collection: "notes", User: "u", Workspace: "w", Content: "notes",
+		Visibility: "team", Data: map[string]any{"fields": map[string]any{
+			"body": map[string]any{"type": "string", "required": true}, "views": map[string]any{"type": "integer"}}}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := e.Put(Record{Kind: "document", Collection: "notes", User: "u", Workspace: "w",
+		Data: map[string]any{"body": "written before the change"}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	widened := clone(made)
+	widened.Version = made.Version
+	widened.Data = map[string]any{"fields": map[string]any{
+		"body":   map[string]any{"type": "string", "required": true},
+		"views":  map[string]any{"type": "integer"},
+		"status": map[string]any{"type": "string"},
+		"stars":  map[string]any{"type": "integer"}}}
+	if _, err = e.Put(widened, made.Version); err != nil {
+		t.Fatal(err)
+	}
+	// The row predating the field reads it at its zero value, which is what ALTER TABLE
+	// ADD COLUMN does with a default, and its revision moves like any other write.
+	after, err := e.Latest(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Data["status"] != "" || after.Data["stars"] != json.Number("0") || after.Version != first.Version+1 {
+		t.Fatal("added fields missing from the stored row:", after.Data, after.Version)
+	}
+	// A required field cannot be conjured onto rows that are already there.
+	refused := clone(made)
+	refused.Version = after.Version
+	refused.Data = map[string]any{"fields": map[string]any{
+		"body":   map[string]any{"type": "string", "required": true},
+		"author": map[string]any{"type": "string", "required": true}}}
+	if _, err = e.Put(refused, after.Version); err == nil {
+		t.Fatal("required field added over existing rows was accepted")
+	}
+	// A nested path would need an object nobody declared.
+	nested := clone(made)
+	nested.Version = after.Version
+	nested.Data = map[string]any{"fields": map[string]any{
+		"body":     map[string]any{"type": "string", "required": true},
+		"a.b":      map[string]any{"type": "string"},
+		"author_x": map[string]any{"type": "string"}}}
+	if _, err = e.Put(nested, after.Version); err == nil {
+		t.Fatal("nested added field was accepted")
 	}
 }

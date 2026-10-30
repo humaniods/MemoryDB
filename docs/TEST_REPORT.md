@@ -1,18 +1,48 @@
 # Verification report — MemoryDB 0.2
 
-Executed in the implementation session on Linux with Go 1.27.3 and a C compiler.
-These are local results; GitHub Actions has not yet been run for this repository.
+Originally executed on Linux with Go 1.27.3 and a C compiler, and **re-run on 28 October
+2026** on the Linux box that carries the Univorya integration, whose `go` is 1.18.1 — the
+module asks for 1.24 and older toolchains ignore the directive, so everything below passed
+on 1.18.1 except the cross-compiles noted. These are local results; GitHub Actions has not
+yet been run for this repository.
 
 | Check | Result |
 |---|---|
-| `go test -race -coverprofile=... ./...` | PASS: 24 engine/API tests + 1 Go client test |
-| Engine/API statement coverage | 65.2% |
+| `go test -race -coverprofile=... ./...` | PASS: 31 engine/API tests + 1 Go client test |
+| Engine/API statement coverage | 68.8% |
 | Go client statement coverage | 60.9% |
 | `go vet ./...` | PASS |
 | `python3 tests/smoke.py` | PASS: actual server + HTTP + Python SDK |
 | `node tests/ui.cjs` | PASS: actual server + headless Chromium |
 | Desktop console visual inspection | PASS: rendered screenshot inspected |
 | Mobile width check (390px) | PASS: tested jobs view has no horizontal overflow |
+
+## Local install story (28 October 2026)
+
+The module is now `github.com/humaniods/MemoryDB` and the server answers `-version`, so the
+database can be obtained without cloning this tree. What was actually executed here:
+
+| Check | Result |
+|---|---|
+| `bash build-dist.sh linux/amd64 linux/arm64 darwin/amd64` | PASS — three `CGO_ENABLED=0` archives in `dist/` plus `sha256sums.txt` |
+| `bash build-dist.sh` (all four default targets) | `darwin/arm64` fails inside Go 1.18.1's own assembler (`sys_darwin_arm64.s: unexpected token`), not in this code; the release workflow pins Go 1.24 |
+| `GOOS=windows go build` | Fails with `undefined: lockPath` — `lock_unix.go` is `//go:build linux \|\| darwin \|\| freebsd`, so Windows stays unsupported and `install.sh` says so instead of offering a broken artifact |
+| `bash install.sh` against `--dist-base file://…/dist` | PASS — fetched the archive for this OS/CPU, matched it against `sha256sums.txt`, installed `~/.local/bin/memorydb`, printed `installed 0.2.0` from the binary itself |
+| `bash install.sh --from <archive>` | PASS when `sha256sums.txt` beside it names and matches the file |
+| `bash install.sh --from` with a wrong checksum | exits 1: `sha256 mismatch … refusing to install it` |
+| `bash install.sh --from renamed.tar.gz` beside a sidecar that does not name it | exits 1: `… is not listed in …; refusing`, with `MEMORYDB_UNCHECKED=1` as the documented override |
+| `bash install.sh --from` an archive built for another CPU | installs and reports `unknown (could not execute it here)` instead of claiming a version it never ran |
+| `bash install.sh --source .` | PASS — builds with `go build -trimpath -ldflags -X main.version=…`, no network |
+| missing asset (`--dist-base file:///tmp/nope`) | exits 1 and points at `--source` rather than installing nothing |
+| `uname` shim reporting `MINGW64_NT-10.0` | exits 1 with the WSL / `docker build` instructions before touching the filesystem |
+| `bash install.sh --help` | prints the four usage lines and exits 0 |
+| installed binary serving | `MemoryDB 0.2.0 listening on 127.0.0.1:8099`; `/api/v1/health/` returns `version: 0.2.0` with a bearer token and 401 without one |
+| `pip install ./sdk` in a fresh Python 3.10 venv | PASS — `sanyam_memorydb_client-0.2.0-py3-none-any.whl` built and installed; that venv's `memorydb` module (loaded from `site-packages`) created a collection and read back a record through the installed server |
+
+Not executed here: `install.sh`'s default GitHub-release fetch, `go install
+github.com/humaniods/MemoryDB@latest`, `pip install git+https://…#subdirectory=sdk` and
+`.github/workflows/release.yml` — all four need this work committed and tagged on GitHub,
+which has not been done.
 
 ## Verified failure and consistency cases
 
