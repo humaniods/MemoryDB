@@ -110,19 +110,20 @@ them is named in that release's `sha256sums.txt`. `pip install
 you review a newer commit than the last tag, and that form installs the client first so the
 Django/LangChain packages find their dependency already satisfied.
 
-Verified end-to-end after cutting v0.2.0, from a virtualenv with no repository checkout on
+Verified end-to-end after cutting v0.2.1, from a virtualenv with no repository checkout on
 the path: the three release wheels installed with plain `pip install <url>`; `mdb serve`
-downloaded `memorydb-0.2.0-linux-amd64.tar.gz` from the release, checked it against
+downloaded `memorydb-0.2.1-linux-amd64.tar.gz` from the release, checked it against
 `sha256sums.txt`, generated a token and started the server; the Python client, the Django
 cache and session backends through `SessionMiddleware`, `memorydb-langchain` history and the
 MCP `tools/list` handshake all worked against that server; `install.sh` fetched and verified
-the same archive standalone; `bash build-dist.sh` produced all four platform archives
+the same archive standalone; every asset in the release was re-downloaded and passed
+`sha256sum -c`, with the four archives holding correctly cross-compiled static binaries
 (`darwin/arm64` needs the Go 1.24+ the workflow installs); and
-`docker pull ghcr.io/humaniods/memorydb:0.2.0` succeeded anonymously, both architectures,
+`docker pull ghcr.io/humaniods/memorydb:0.2.1` succeeded anonymously on both architectures,
 serving health and writes from the running image. Refusals were checked too: a tampered
 archive (`sha256 mismatch`) and one absent from `sha256sums.txt` are both refused.
 
-Published with v0.2.0: the server archives, the three wheels, `sha256sums.txt` and the
+Published with v0.2.1: the server archives, the three wheels, `sha256sums.txt` and the
 `ghcr.io/humaniods/memorydb` image. Pending on the package indexes: `pip install
 superb-memory` by name, and `npm install superb-memory`. Both need a
 one-time account setup — PyPI projects with Trusted Publishing for this repository plus the
