@@ -21,9 +21,12 @@ Nothing on this machine but pip — `mdb serve` downloads the release binary, ch
 the release's `sha256sums.txt`, and runs it:
 
 ```bash
-pip install sanyam-memorydb-client
+pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.0/sanyam_memorydb_client-0.2.0-py3-none-any.whl
 mdb serve            # data in ~/.memorydb/data, token in ~/.memorydb/token (0600)
 ```
+
+`pip install sanyam-memorydb-client` by name works once the PyPI project is published; the
+release wheel above is the same file.
 
 Same server/VPS — keep the database on loopback only:
 

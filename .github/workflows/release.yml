@@ -108,6 +108,9 @@ jobs:
           cd artifacts
           ls | grep -v '^sha256sums.txt$' | xargs sha256sum > sha256sums.txt
           cat sha256sums.txt
+      - name: client wheel file name for the release notes
+        id: wheel
+        run: echo "file=$(basename artifacts/sanyam_memorydb_client-*-py3-none-any.whl | head -1)" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -116,7 +119,7 @@ jobs:
             Fastest start, no clone and no Go:
 
             ```bash
-            pip install sanyam-memorydb-client
+            pip install ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ steps.wheel.outputs.file }}
             mdb serve          # downloads this release's binary, checks its sha256, runs it
             ```
 

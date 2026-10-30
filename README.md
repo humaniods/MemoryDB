@@ -18,9 +18,12 @@ on it (`undefined: lockPath`). On Windows use WSL or the Docker image.
 **Fastest path — pip only, no clone and no Go toolchain:**
 
 ```bash
-pip install sanyam-memorydb-client    # client + mdb CLI + memorydb-mcp
-mdb serve                             # fetches the release binary, checks its sha256, runs it
+pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.0/sanyam_memorydb_client-0.2.0-py3-none-any.whl
+mdb serve      # fetches the release binary, checks its sha256, runs it
 ```
+
+Once the `sanyam-memorydb-client` name is live on PyPI the same two lines are
+`pip install sanyam-memorydb-client` and `mdb serve`.
 
 `mdb serve` keeps everything under `~/.memorydb` (binary cache, journal, token) and prints
 the connection string before starting:
@@ -93,31 +96,38 @@ Three distributions, one name on each index:
 | `sdk/node` (npm: `sanyam-memorydb-client`) | dependency-free Node 18+ client with types |
 
 ```bash
-pip install sanyam-memorydb-client memorydb-django memorydb-langchain   # once published
-pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk" \
-          "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk/django"   # today
+V=https://github.com/humaniods/MemoryDB/releases/download/v0.2.0
+pip install $V/sanyam_memorydb_client-0.2.0-py3-none-any.whl    # client + mdb + memorydb-mcp
+pip install $V/memorydb_django-0.2.0-py3-none-any.whl           # CACHES + SESSION_ENGINE
+pip install $V/memorydb_langchain-0.2.0-py3-none-any.whl        # chat message history
+
+pip install sanyam-memorydb-client memorydb-django memorydb-langchain   # once the PyPI names are live
 ```
 
-The git form installs the client first, so the Django/LangChain packages find their
-dependency already satisfied; `pip install ./sdk ./sdk/django` does the same from a clone.
+The wheels come from the release itself, so they need no clone and no git; every one of
+them is named in that release's `sha256sums.txt`. `pip install
+"git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk"` is the equivalent while
+you review a newer commit than the last tag, and that form installs the client first so the
+Django/LangChain packages find their dependency already satisfied.
 
-Verified here: `build-dist.sh` for `linux/amd64`, `linux/arm64` and `darwin/amd64`; `install.sh`
-against that `file://` dist directory (checksum checked, binary installed, server answered a
-health request); `mdb serve` from a wheel-only virtualenv - it downloaded and verified the
-archive, generated a token at `~/.memorydb/token` (0600), started the server, and a
-`pip install`ed client, the Django cache/session backends through `SessionMiddleware`,
-`memorydb-langchain` history and the MCP `tools/list` handshake all worked against it without
-any repository checkout on the path. Refused installs were checked too: a tampered archive
-(`sha256 mismatch`) and an archive absent from `sha256sums.txt`.
-`darwin/arm64` needs the newer toolchain the release workflow uses (Go 1.24+); an older Go
-fails inside its own assembler.
+Verified end-to-end after cutting v0.2.0, from a virtualenv with no repository checkout on
+the path: the three release wheels installed with plain `pip install <url>`; `mdb serve`
+downloaded `memorydb-0.2.0-linux-amd64.tar.gz` from the release, checked it against
+`sha256sums.txt`, generated a token and started the server; the Python client, the Django
+cache and session backends through `SessionMiddleware`, `memorydb-langchain` history and the
+MCP `tools/list` handshake all worked against that server; `install.sh` fetched and verified
+the same archive standalone; `bash build-dist.sh` produced all four platform archives
+(`darwin/arm64` needs the Go 1.24+ the workflow installs); and
+`docker pull ghcr.io/humaniods/memorydb:0.2.0` succeeded anonymously, both architectures,
+serving health and writes from the running image. Refusals were checked too: a tampered
+archive (`sha256 mismatch`) and one absent from `sha256sums.txt` are both refused.
 
-What still requires a publish step: the release archives, the `github.com/humaniods/MemoryDB`
-Go module path and the PyPI/npm names only exist once this work is committed, tagged and
-released - the release workflow builds all of it, and its `pypi`/`npm` jobs turn on with the
-`PUBLISH_PYPI` / `PUBLISH_NPM` repository variables. Until then `--source`, `--from`, `--bin`
-and the `git+https` install lines are the paths that work for anyone else, alongside the
-Docker image.
+Published with v0.2.0: the server archives, the three wheels, `sha256sums.txt` and the
+`ghcr.io/humaniods/memorydb` image. Pending on the package indexes: `pip install
+sanyam-memorydb-client` by name, and `npm install sanyam-memorydb-client`. Both need a
+one-time account setup — PyPI projects with Trusted Publishing for this repository plus the
+`PUBLISH_PYPI=true` repository variable, and an `NPM_TOKEN` secret plus `PUBLISH_NPM=true` —
+after which the release workflow's `pypi` and `npm` jobs do the upload on every tag.
 
 ## Clients and integrations
 

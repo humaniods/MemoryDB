@@ -3,18 +3,20 @@
 ## 1. Run the server (pick one)
 
 ```bash
-# pip only - no clone, no Go: fetches the release binary, verifies its sha256, runs it
-pip install sanyam-memorydb-client
+# pip only - no clone, no Go toolchain: this wheel is the one attached to the release,
+# and `mdb serve` then fetches the server binary and verifies its sha256 before running it
+pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.0/sanyam_memorydb_client-0.2.0-py3-none-any.whl
 mdb serve
 #   connect: memorydb://TOKEN@127.0.0.1:8080   (data lives in ~/.memorydb/data/memory.wal)
 
-# Container (data persists in a volume)
+# Container (data persists in a volume; public image, linux/amd64 and arm64)
 docker run -d --name memorydb -p 127.0.0.1:8080:8080 \
   -e MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
   -v memorydb-data:/data ghcr.io/humaniods/memorydb:latest
 
-# Installed binary (install.sh fetches the release archive for your OS/CPU)
-bash install.sh
+# Installed binary (fetches the release archive for your OS/CPU and checks its checksum)
+curl -fsSL https://raw.githubusercontent.com/humaniods/MemoryDB/v0.2.0/install.sh | bash
+bash install.sh          # same script, from a clone: --source . builds instead of downloading
 export MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 memorydb -data memory.wal -worker
 
@@ -22,7 +24,10 @@ memorydb -data memory.wal -worker
 go build -o memorydb . && ./memorydb -data memory.wal -worker
 ```
 
-Before the release exists on PyPI, install the client straight from the repository:
+`pip install sanyam-memorydb-client` by name works as soon as the PyPI project is published
+(see the release workflow's `pypi` job); until then the release wheel above is the install,
+and it is byte-for-byte what PyPI will serve. For a commit newer than the last tag, install
+from the repository instead:
 
 ```bash
 pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk"
