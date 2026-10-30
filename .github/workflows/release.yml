@@ -1,0 +1,123 @@
+name: release
+
+# Cutting a tag named v<version> publishes the server archives that install.sh and
+# `mdb serve` fetch, builds all three Python wheels, and - once you turn them on -
+# uploads to PyPI and npm so that `pip install sanyam-memorydb-client` works for anyone.
+# Windows is absent on purpose: the database lock is advisory flock(), which Go only
+# implements on Unix, so there is no honest Windows artifact to offer - WSL and the
+# Docker image cover that audience.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: build every platform into dist/
+        run: bash build-dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memorydb-server
+          path: dist/
+
+  python-clients:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade build
+      # All three distributions: the client/CLI/MCP wheel, the Django backends, the
+      # LangChain wrapper. Each has its own pyproject.toml and README.
+      - run: |
+          for pkg in sdk sdk/django sdk/langchain; do
+            python -m build --outdir dist-wheel "$pkg"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memorydb-python
+          path: dist-wheel/*
+
+  # GitHub Releases always get the archives, because install.sh and `mdb serve` read
+  # them straight off the release page.
+  publish:
+    needs: [server, python-clients]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: one checksums file for the whole release
+        run: |
+          cd artifacts
+          ls | grep -v '^sha256sums.txt$' | xargs sha256sum > sha256sums.txt
+          cat sha256sums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          body: |
+            Fastest start, no clone and no Go:
+
+            ```bash
+            pip install sanyam-memorydb-client
+            mdb serve          # downloads this release's binary, checks its sha256, runs it
+            ```
+
+            `bash install.sh` does the same for the server alone and checks each archive
+            against `sha256sums.txt` before installing; `--source /path/to/MemoryDB` builds
+            instead of downloading. Server archives are `CGO_ENABLED=0` static builds of the
+            tagged commit. Wheels: `sanyam-memorydb-client` (client + `mdb` + `memorydb-mcp`),
+            `memorydb-django` (cache/session backends), `memorydb-langchain` (chat history).
+
+  # Package indexes stay off until the project is configured for them, so the workflow
+  # never shows a red job before you are ready:
+  #   PyPI - create the projects sanyam-memorydb-client, memorydb-django, memorydb-langchain
+  #          with Trusted Publishing for this repo and the "pypi" environment, then set the
+  #          repository variable PUBLISH_PYPI=true.
+  #   npm  - add the NPM_TOKEN secret and the repository variable PUBLISH_NPM=true
+  #          (the npm package is sdk/node, published as sanyam-memorydb-client).
+  pypi:
+    if: vars.PUBLISH_PYPI == 'true'
+    needs: [python-clients]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: memorydb-python
+          path: dist-wheel
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-wheel/
+
+  npm:
+    if: vars.PUBLISH_NPM == 'true'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm publish
+        working-directory: sdk/node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

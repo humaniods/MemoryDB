@@ -5,7 +5,7 @@ cognitive capability. Neither reference system is imported or fully reproduced.
 
 | Area | Implemented | Remaining boundary |
 |---|---|---|
-| General data | JSON collections, schemas, CRUD, unique/equality indexes, typed comparisons, cursor pagination, projection, count | No SQL, joins, aggregation pipeline or Django ORM backend |
+| General data | JSON collections, schemas, CRUD, unique indexes with `casefold` columns, equality indexes, typed comparisons, cursor pagination, projection, count, `where`/`or`/`not` predicates, `icontains`/`iequals` matching, `sum`/`avg`/`min`/`max` with `group_by`, atomic `inc` counters | No SQL, joins or Django ORM backend (the Django integration covers caches and sessions, not models); `contains` on an array is membership, not substring - keep a joined text field for full-text search; aggregates cover the filtered set, not the page |
 | Transactions | Atomic 1–256 write batches, revision checks, durable receipts | No interactive multi-request transactions; not universal exactly-once HTTP retries |
 | Persistence | Framed WAL, fsync, checksums, partial-tail recovery, lock, compaction, checksummed backup/restore | RAM resident; snapshot max 32 MiB; no segment engine, replication or PITR |
 | Conversations | Raw messages, evidence-linked structured facts, exact quote validation | No semantic-entailment proof or evaluation corpus |
@@ -22,7 +22,7 @@ cognitive capability. Neither reference system is imported or fully reproduced.
 | Permissions | Token-bound workspace/user, roles, team/private/reader-list visibility, owner-only history | No identity provider, dynamic team membership, per-agent authentication or separate access audit log |
 | Jobs | WAL-backed ingest jobs, leases, five attempts, restart recovery, console | Failed jobs need explicit retry; no distributed queue or fair scheduling guarantee |
 | UI | Collection/query/editor console, transactions, ingestion/jobs/graph, memory Studio | Graph output is JSON; schema editing and operational maintenance use API/CLI |
-| Integrations | Python manager/query builder, Go HTTP SDK, language-neutral HTTP | No MCP, desktop proxy or external application connectors |
+| Integrations | Python manager/query builder, Go HTTP SDK, Node/TS client, `mdb` CLI (including `mdb serve`, which downloads and sha256-checks the server), stdio MCP server, LangChain chat history, Django cache + session backends (`memorydb_django`), connection strings (`memorydb://TOKEN@host:port`), language-neutral HTTP | Packages are installable from the tree or a git URL; PyPI/npm names are free (`sanyam-memorydb-client`, `memorydb-django`, `memorydb-langchain`) but unpublished, so the wheels are not yet resolvable by name. No Django *database* backend (models/migrations/admin still need SQL), no desktop proxy or hosted connectors yet |
 | Forgetting | Logical tombstones, expiry, bounded history compaction | Receipts/backups retain data; no physical erasure |
 
 Production completion requires defined workload/capacity targets, sustained fault

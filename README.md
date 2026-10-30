@@ -8,14 +8,73 @@ reference memory system is embedded. Go runtime dependencies: standard library o
 APIs, not a PostgreSQL/MongoDB replacement or full TencentDB/Hy-Memory parity.
 The precise supported scope and remaining capabilities are in [FEATURES](docs/FEATURES.md).
 
-## Start
+## Install and start
 
-Requires Linux, Go 1.24+ and Python 3.10+ for the Python client. Tested on Linux
-with Go 1.27.3. Windows native builds are unsupported; use Linux/WSL.
+Requires Linux or macOS, Go 1.24+ to build from source and Python 3.10+ for the Python
+client. Tested on Linux with Go 1.27.3. **Windows has no native build**: the journal lock
+is advisory `flock()`, which Go only exposes on Unix, and a `GOOS=windows` compile fails
+on it (`undefined: lockPath`). On Windows use WSL or the Docker image.
+
+**Fastest path — pip only, no clone and no Go toolchain:**
+
+```bash
+pip install sanyam-memorydb-client    # client + mdb CLI + memorydb-mcp
+mdb serve                             # fetches the release binary, checks its sha256, runs it
+```
+
+`mdb serve` keeps everything under `~/.memorydb` (binary cache, journal, token) and prints
+the connection string before starting:
+
+```
+  connect: memorydb://TOKEN@127.0.0.1:8080
+  console: http://127.0.0.1:8080   studio: http://127.0.0.1:8080/studio/
+```
+
+Point every client at it and go:
+
+```bash
+export MEMORYDB_URL=memorydb://TOKEN@127.0.0.1:8080
+mdb health
+python3 -c "from memorydb import MemoryDB; print(MemoryDB().objects.search('fridays'))"
+```
+
+Use `--bin <path>`, `--from <archive>` or `--source <tree>` to run a binary you already
+have, `--addr`/`--data`/`--worker` to place it, and flags after `--` reach the server
+(`-- -tls-cert cert.pem -tls-key key.pem`). The archive is refused if its sha256 does not
+match the release's `sha256sums.txt`.
+
+Server-only install, without the Python package:
+
+```bash
+bash install.sh                    # newest release archive for this OS/CPU, sha256-checked
+bash install.sh --source .         # no release yet? build from this tree instead
+bash install.sh --from memorydb-0.2.0-linux-amd64.tar.gz
+```
+
+It installs to `~/.local/bin/memorydb` (override with `--prefix` or `MEMORYDB_INSTALL_DIR`)
+and prints the exact start command with a freshly generated token. Release archives come
+from the GitHub release for the tag; `--version`, `--dist-base` (including a `file://`
+directory) pick a different one. `build-dist.sh` produces those archives plus
+`sha256sums.txt` locally, which is what the release workflow runs.
+
+An archive is installed only if it matches its checksum. With `--from`, a `sha256sums.txt`
+next to the file is used, and an archive that file does not name is refused rather than
+installed unchecked (`MEMORYDB_UNCHECKED=1` overrides if you know why).
+
+The server is one static binary with no runtime dependencies, so any of these is a
+complete install:
+
+```bash
+go install github.com/humaniods/MemoryDB@latest      # the module path is the repo
+go build -trimpath -ldflags "-s -w" -o memorydb .    # or, from a clone
+python3 manage.py runserver -worker                  # or, the familiar entry point
+docker build -t memorydb .                           # or, containerised
+```
 
 ```bash
 export MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-python3 manage.py runserver -worker
+./memorydb -data memory.wal -addr 127.0.0.1:8080 -worker
+memorydb -version                                      # or ~/.local/bin/memorydb, from install.sh
 ```
 
 Open http://127.0.0.1:8080, click **Connect database**, and use your token.
@@ -23,13 +82,92 @@ Collections, document CRUD, queries, transactions, ingestion and jobs are in the
 console. `/studio/` provides memory browsing, editing, search and revision history.
 Tokens stay in page memory. Restart with the same `-data` path to retain data.
 
+Three distributions, one name on each index:
+
+| Package | What it gives you |
+|---|---|
+| `sanyam-memorydb-client` | `from memorydb import MemoryDB`, the `mdb` CLI and the `memorydb-mcp` stdio server |
+| `memorydb-django` | `CACHES` + `SESSION_ENGINE` backends |
+| `memorydb-langchain` | `MemoryDBChatMessageHistory` |
+| `sdk/node` (npm: `sanyam-memorydb-client`) | dependency-free Node 18+ client with types |
+
 ```bash
-go build -o memorydb .
-./memorydb -data memory.wal -addr 127.0.0.1:8080 -worker
-pip install ./sdk
+pip install sanyam-memorydb-client memorydb-django memorydb-langchain   # once published
+pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk" \
+          "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk/django"   # today
 ```
 
+The git form installs the client first, so the Django/LangChain packages find their
+dependency already satisfied; `pip install ./sdk ./sdk/django` does the same from a clone.
+
+Verified here: `build-dist.sh` for `linux/amd64`, `linux/arm64` and `darwin/amd64`; `install.sh`
+against that `file://` dist directory (checksum checked, binary installed, server answered a
+health request); `mdb serve` from a wheel-only virtualenv - it downloaded and verified the
+archive, generated a token at `~/.memorydb/token` (0600), started the server, and a
+`pip install`ed client, the Django cache/session backends through `SessionMiddleware`,
+`memorydb-langchain` history and the MCP `tools/list` handshake all worked against it without
+any repository checkout on the path. Refused installs were checked too: a tampered archive
+(`sha256 mismatch`) and an archive absent from `sha256sums.txt`.
+`darwin/arm64` needs the newer toolchain the release workflow uses (Go 1.24+); an older Go
+fails inside its own assembler.
+
+What still requires a publish step: the release archives, the `github.com/humaniods/MemoryDB`
+Go module path and the PyPI/npm names only exist once this work is committed, tagged and
+released - the release workflow builds all of it, and its `pypi`/`npm` jobs turn on with the
+`PUBLISH_PYPI` / `PUBLISH_NPM` repository variables. Until then `--source`, `--from`, `--bin`
+and the `git+https` install lines are the paths that work for anyone else, alongside the
+Docker image.
+
+## Clients and integrations
+
+Every client speaks one connection string, like `mongodb://` and `redis://` do:
+
+```
+memorydb://TOKEN@127.0.0.1:8080          # plain HTTP (loopback/dev)
+memorydbs://TOKEN@host:443               # TLS
+```
+
+| Interface | Package / entry point | Notes |
+|---|---|---|
+| Python | `pip install ./sdk` → `MemoryDB()` | reads `MEMORYDB_URL`; also `MemoryDB.from_url(...)` |
+| CLI | same wheel → `mdb health / doc / query / search / memory / ingest / tx` | scripts, cron, CI |
+| MCP server | same wheel → `memorydb-mcp` (stdio) | Claude Desktop, Qoder, IDE agents; see `examples/mcp_config.json` |
+| Node / TypeScript | `sdk/node` (`import MemoryDB from './sdk/node/index.mjs'`) | dependency-free, Node 18+, ships `index.d.ts` |
+| Go | `sdk/goclient` → `goclient.Connect("memorydb://…")` | stdlib only |
+| LangChain | `pip install -e sdk/langchain` → `MemoryDBChatMessageHistory` | needs `langchain-core`; each append is an immutable revision |
+| Django | `pip install ./sdk/django` → `memorydb_django.MemoryDBCache`, `memorydb_django.sessions` | two lines in `settings.py` replace the cache and session stores; TTLs use the engine's own record expiry |
+
+See `docs/QUICKSTART.md` for the 60-second path, `docs/CONNECTING.md` for step-by-step
+recipes to connect a website, frontend product, AI agent (MCP), LangChain or Django app, and
+`examples/` for runnable demos
+(`curl_demo.sh`, `python_quickstart.py`, `node_quickstart.mjs`, `langchain_demo.py`,
+`django_demo.py`).
+
 ## Use from Django or another Python application
+
+Cache and sessions are a `settings.py` drop-in, the way `sqlite3` is for Django itself:
+
+```python
+# pip install ./sdk ./sdk/django
+CACHES = {"default": {
+    "BACKEND": "memorydb_django.MemoryDBCache",
+    "LOCATION": "memorydb://TOKEN@127.0.0.1:8080",
+}}
+SESSION_ENGINE = "memorydb_django.sessions"   # MEMORYDB_URL env var works too
+```
+
+`cache.set("hero", payload, timeout=30)` writes one MemoryDB record carrying that TTL as the
+record's own `expires`, so the server stops serving it at the deadline - no sweep cron, and
+`SESSION_COOKIE_AGE` is enforced the same way. `cache.add/get_or_set/touch/delete_many/clear`
+and Django's `SessionStore` contract (`create/save/load/exists/delete/flush/cycle_key`) all
+behave as documented, including `CreateError` on a key collision and optimistic retries when a
+concurrent writer bumps the version. `examples/django_demo.py` runs the checks through Django's
+own `SessionMiddleware`.
+
+The Python client has a custom lazy query builder for your own collections. It is not a Django
+database backend: Django models, migrations, SQL joins and Django Admin integration are
+not implemented. Use it from your Django service/view. Any language can use the
+HTTP API; Go helpers are in `sdk/goclient`.
 
 ```python
 import os
@@ -48,11 +186,6 @@ rows = Customer.objects.filter(age__gte=18).order_by('-age').only('email').all()
 row = Customer.objects.update(pk=row['id'], version=row['version'], age=25)
 Customer.objects.delete(pk=row['id'], version=row['version'])
 ```
-
-The Python client has a custom lazy query builder. It is not a Django database
-backend: Django models, migrations, SQL joins and Django Admin integration are
-not implemented. Use it from your Django service/view. Any language can use the
-HTTP API; Go helpers are in `sdk/goclient`.
 
 ## Supported operations
 
