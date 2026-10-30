@@ -68,7 +68,8 @@ complete install:
 go install github.com/humaniods/MemoryDB@latest      # the module path is the repo
 go build -trimpath -ldflags "-s -w" -o memorydb .    # or, from a clone
 python3 manage.py runserver -worker                  # or, the familiar entry point
-docker build -t memorydb .                           # or, containerised
+docker pull ghcr.io/humaniods/memorydb:latest        # or, the published image (amd64 + arm64)
+docker build -t memorydb .                           # or, build that image from this tree
 ```
 
 ```bash

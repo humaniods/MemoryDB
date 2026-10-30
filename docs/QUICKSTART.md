@@ -11,7 +11,7 @@ mdb serve
 # Container (data persists in a volume)
 docker run -d --name memorydb -p 127.0.0.1:8080:8080 \
   -e MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
-  -v memorydb-data:/data memorydb
+  -v memorydb-data:/data ghcr.io/humaniods/memorydb:latest
 
 # Installed binary (install.sh fetches the release archive for your OS/CPU)
 bash install.sh

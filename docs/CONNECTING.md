@@ -30,7 +30,7 @@ Same server/VPS — keep the database on loopback only:
 ```bash
 docker run -d --name memorydb -p 127.0.0.1:8080:8080 \
   -e MEMORYDB_TOKEN="$(openssl rand -base64 32)" \
-  -v memorydb-data:/data memorydb
+  -v memorydb-data:/data ghcr.io/humaniods/memorydb:latest
 ```
 
 Separate machine — the server refuses to start on a public address without TLS:
