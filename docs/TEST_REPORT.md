@@ -41,11 +41,12 @@ database can be obtained without cloning this tree. What was actually executed h
 | the three release wheels by URL in a checkout-free venv | PASS — `pip install <release wheel URL>` for `superb-memory`, `memorydb-django`, `memorydb-langchain`, then `mdb serve` downloaded `memorydb-0.2.1-linux-amd64.tar.gz`, verified it against `sha256sums.txt` and served the Python client, the Django cache and sessions through `SessionMiddleware`, LangChain history and the MCP `tools/list` handshake |
 | every v0.2.1 asset against `sha256sums.txt` | PASS — 10/10 `OK` after re-download; the four archives contain `ELF x86-64`/`ELF aarch64` statically linked and `Mach-O x86_64`/`arm64` PIE binaries respectively |
 | anonymous `docker pull ghcr.io/humaniods/memorydb:0.2.1` | PASS with an empty `DOCKER_CONFIG` (public package), both platforms in the index; the running container answered health and accepted writes |
+| `pip install superb-memory` **by name** from PyPI | PASS — clean Python 3.10 venv with no checkout on the path: `pip show` reports 0.2.1, `mdb` and `memorydb-mcp` land on PATH, `mdb serve` downloaded and sha256-verified `memorydb-0.2.1-linux-amd64.tar.gz`, and that venv's client created, searched and deleted a record through the served database |
+| the release workflow's `pypi` job | PASS — run 41183014621 uploaded `superb_memory-0.2.1` wheel + sdist through Trusted Publishing (OIDC from the `pypi` environment, no index credential in the repository); `https://pypi.org/pypi/superb-memory/json` then reported version `0.2.1`, and the two gated-out uploads skipped rather than failing |
 
-Not executed here: `install.sh`'s default GitHub-release fetch, `go install
-github.com/humaniods/MemoryDB@latest`, `pip install git+https://…#subdirectory=sdk` and
-`.github/workflows/release.yml` — all four need this work committed and tagged on GitHub,
-which has not been done.
+Not executed here: `pip install "git+https://…#subdirectory=sdk"`, which is only interesting
+for a commit newer than the last tag. Everything else above ran against the published v0.2.1
+release, the GitHub Actions runs for it, PyPI and ghcr.io.
 
 ## Verified failure and consistency cases
 

@@ -3,9 +3,9 @@
 ## 1. Run the server (pick one)
 
 ```bash
-# pip only - no clone, no Go toolchain: this wheel is the one attached to the release,
-# and `mdb serve` then fetches the server binary and verifies its sha256 before running it
-pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.1/superb_memory-0.2.1-py3-none-any.whl
+# pip only - no clone, no Go toolchain: the client from PyPI, and `mdb serve` then fetches
+# the server binary from the release and verifies its sha256 before running it
+pip install superb-memory
 mdb serve
 #   connect: memorydb://TOKEN@127.0.0.1:8080   (data lives in ~/.memorydb/data/memory.wal)
 
@@ -24,10 +24,10 @@ memorydb -data memory.wal -worker
 go build -o memorydb . && ./memorydb -data memory.wal -worker
 ```
 
-`pip install superb-memory` by name works as soon as the PyPI project is published
-(see the release workflow's `pypi` job); until then the release wheel above is the install,
-and it is byte-for-byte what PyPI will serve. For a commit newer than the last tag, install
-from the repository instead:
+`superb-memory` is on PyPI, uploaded by the release workflow's `pypi` job through Trusted
+Publishing (no index token involved). The Django and LangChain packages are still installed
+from the release wheels until their own PyPI names go live. For a commit newer than the last
+tag, install from the repository instead:
 
 ```bash
 pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk"

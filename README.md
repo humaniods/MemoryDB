@@ -18,12 +18,9 @@ on it (`undefined: lockPath`). On Windows use WSL or the Docker image.
 **Fastest path — pip only, no clone and no Go toolchain:**
 
 ```bash
-pip install https://github.com/humaniods/MemoryDB/releases/download/v0.2.1/superb_memory-0.2.1-py3-none-any.whl
+pip install superb-memory
 mdb serve      # fetches the release binary, checks its sha256, runs it
 ```
-
-Once the `superb-memory` name is live on PyPI the same two lines are
-`pip install superb-memory` and `mdb serve`.
 
 `mdb serve` keeps everything under `~/.memorydb` (binary cache, journal, token) and prints
 the connection string before starting:
@@ -96,24 +93,26 @@ Three distributions, one name on each index:
 | `sdk/node` (npm: `superb-memory`) | dependency-free Node 18+ client with types |
 
 ```bash
+pip install superb-memory                              # client + mdb + memorydb-mcp
+
 V=https://github.com/humaniods/MemoryDB/releases/download/v0.2.1
-pip install $V/superb_memory-0.2.1-py3-none-any.whl    # client + mdb + memorydb-mcp
 pip install $V/memorydb_django-0.2.1-py3-none-any.whl           # CACHES + SESSION_ENGINE
 pip install $V/memorydb_langchain-0.2.1-py3-none-any.whl        # chat message history
-
-pip install superb-memory memorydb-django memorydb-langchain   # once the PyPI names are live
 ```
 
-The wheels come from the release itself, so they need no clone and no git; every one of
-them is named in that release's `sha256sums.txt`. `pip install
+`superb-memory` comes from PyPI. The Django and LangChain wheels are attached to the release
+as well, so they need no clone and no git; every one of them is named in that release's
+`sha256sums.txt`. `pip install
 "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk"` is the equivalent while
 you review a newer commit than the last tag, and that form installs the client first so the
 Django/LangChain packages find their dependency already satisfied.
 
 Verified end-to-end after cutting v0.2.1, from a virtualenv with no repository checkout on
-the path: the three release wheels installed with plain `pip install <url>`; `mdb serve`
+the path: `pip install superb-memory` resolved by name from PyPI, and that venv's `mdb serve`
 downloaded `memorydb-0.2.1-linux-amd64.tar.gz` from the release, checked it against
-`sha256sums.txt`, generated a token and started the server; the Python client, the Django
+`sha256sums.txt`, generated a token and started the server, after which the installed client
+created a collection and read back a record; the three release wheels installed with plain
+`pip install <url>`; the Python client, the Django
 cache and session backends through `SessionMiddleware`, `memorydb-langchain` history and the
 MCP `tools/list` handshake all worked against that server; `install.sh` fetched and verified
 the same archive standalone; every asset in the release was re-downloaded and passed
@@ -123,12 +122,15 @@ the same archive standalone; every asset in the release was re-downloaded and pa
 serving health and writes from the running image. Refusals were checked too: a tampered
 archive (`sha256 mismatch`) and one absent from `sha256sums.txt` are both refused.
 
-Published with v0.2.1: the server archives, the three wheels, `sha256sums.txt` and the
-`ghcr.io/humaniods/memorydb` image. Pending on the package indexes: `pip install
-superb-memory` by name, and `npm install superb-memory`. Both need a
-one-time account setup — PyPI projects with Trusted Publishing for this repository plus the
-`PUBLISH_PYPI=true` repository variable, and an `NPM_TOKEN` secret plus `PUBLISH_NPM=true` —
-after which the release workflow's `pypi` and `npm` jobs do the upload on every tag.
+Published with v0.2.1: the server archives, the three wheels, `sha256sums.txt`, the
+`ghcr.io/humaniods/memorydb` image and `superb-memory` on PyPI - uploaded by the release
+workflow through Trusted Publishing, so no index credential is stored anywhere. Still to
+switch on: the `memorydb-django` and `memorydb-langchain` names on PyPI, which need one
+pending publisher and one run each (PyPI allows only one pending publisher per
+repository + workflow + environment), and `npm install superb-memory`, which needs an
+`NPM_TOKEN` secret plus `PUBLISH_NPM=true`. Each project's name joins the `PYPI_PROJECTS`
+repository variable as its publisher is registered, after which the release workflow's
+`pypi` job uploads it on every tag.
 
 ## Clients and integrations
 
