@@ -14,13 +14,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Image tag to publish (blank uses the pushed tag)
+        description: Image tag to republish (blank skips the image)
         required: false
         default: ''
 
-# A manual run republishes only the container image. Everything else here writes a
-# version-numbered artifact - the release, its checksums, PyPI, npm - and on a branch ref
-# action-gh-release would invent a tag from that branch name.
+# A manual run writes nothing version-numbered unless you ask it to: it republishes the
+# image only when the version input is filled in, and otherwise just re-runs the index
+# uploads. Everything else here is tag-only, because on a branch ref action-gh-release
+# would invent a tag from that branch name.
 permissions:
   contents: write
 
@@ -41,7 +42,6 @@ jobs:
           path: dist/
 
   python-clients:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +64,7 @@ jobs:
   # it inherit this repository's visibility - a personal access token from a laptop would
   # have created it private and left the documented `docker pull` broken for everyone else.
   container:
+    if: github.event_name == 'push' || github.event.inputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,26 +132,54 @@ jobs:
 
   # Package indexes stay off until the project is configured for them, so the workflow
   # never shows a red job before you are ready:
-  #   PyPI - create the projects superb-memory, memorydb-django, memorydb-langchain
-  #          with Trusted Publishing for this repo and the "pypi" environment, then set the
-  #          repository variable PUBLISH_PYPI=true.
+  #   PyPI - no token: this job uses Trusted Publishing (the "pypi" environment below).
+  #          On pypi.org, under Publishing -> "Add a new pending publisher", register one
+  #          project name for this repo + release.yml, add that name to the PYPI_PROJECTS
+  #          repository variable, and the next upload creates the project and turns the
+  #          pending publisher into a normal one. Only one pending publisher per
+  #          (repo, workflow, environment) can exist, so the other two names are added
+  #          one round later each. Then set PUBLISH_PYPI=true.
   #   npm  - add the NPM_TOKEN secret and the repository variable PUBLISH_NPM=true
   #          (the npm package is sdk/node, published as superb-memory).
   pypi:
-    if: github.event_name == 'push' && vars.PUBLISH_PYPI == 'true'
+    if: vars.PUBLISH_PYPI == 'true'
     needs: [python-clients]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: memorydb-python
           path: dist-wheel
+      # PyPI allows one pending publisher per (repository, workflow, environment), so the
+      # three distributions cannot all be *created* in one run: each name joins the
+      # PYPI_PROJECTS variable only once its pending publisher is registered, and stays
+      # there. skip-existing keeps a re-run from failing on what already uploaded.
+      - name: one directory per distribution
+        run: |
+          for d in superb_memory memorydb_django memorydb_langchain; do
+            mkdir -p "dist/$d"
+            mv "dist-wheel/$d"-* "dist/$d/"
+          done
+          ls -1 dist/*/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        if: contains(vars.PYPI_PROJECTS, 'superb-memory')
         with:
-          packages-dir: dist-wheel/
+          packages-dir: dist/superb_memory/
+          skip-existing: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: contains(vars.PYPI_PROJECTS, 'memorydb-django')
+        with:
+          packages-dir: dist/memorydb_django/
+          skip-existing: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: contains(vars.PYPI_PROJECTS, 'memorydb-langchain')
+        with:
+          packages-dir: dist/memorydb_langchain/
+          skip-existing: true
 
   npm:
     if: github.event_name == 'push' && vars.PUBLISH_NPM == 'true'
