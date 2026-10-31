@@ -43,10 +43,13 @@ database can be obtained without cloning this tree. What was actually executed h
 | anonymous `docker pull ghcr.io/humaniods/memorydb:0.2.1` | PASS with an empty `DOCKER_CONFIG` (public package), both platforms in the index; the running container answered health and accepted writes |
 | `pip install superb-memory` **by name** from PyPI | PASS — clean Python 3.10 venv with no checkout on the path: `pip show` reports 0.2.1, `mdb` and `memorydb-mcp` land on PATH, `mdb serve` downloaded and sha256-verified `memorydb-0.2.1-linux-amd64.tar.gz`, and that venv's client created, searched and deleted a record through the served database |
 | the release workflow's `pypi` job | PASS — run 41183014621 uploaded `superb_memory-0.2.1` wheel + sdist through Trusted Publishing (OIDC from the `pypi` environment, no index credential in the repository); `https://pypi.org/pypi/superb-memory/json` then reported version `0.2.1`, and the two gated-out uploads skipped rather than failing |
+| `pip install memorydb-django` **by name** from PyPI | PASS — clean venv, no checkout on the path: it resolved `memorydb-django 0.2.1` + `superb-memory 0.2.1` + `Django 5.2.18` from PyPI, `mdb serve` fetched and sha256-verified the v0.2.1 binary, then `cache.set/get/incr/delete` mapped to exactly one engine record per key (`[':1:delta', ':1:gamma']`, delete removed the row, a 2s TTL row expired on its own) and a session saved by `SessionMiddleware` came back from its cookie in a second process |
+| `pip install "git+https://…#subdirectory=sdk/langchain"` | PASS — clean venv installed `memorydb-langchain 0.2.1` against `superb-memory 0.2.1` from PyPI plus `langchain-core 1.7.3`, and both modules import from `site-packages` |
+| the `pypi` job's per-distribution gating | PASS — run 41188687918 with `PYPI_PROJECTS=superb-memory,memorydb-django` re-ran the first upload as a skip (`skip-existing`) rather than a failure, uploaded the Django wheel + sdist, and left the third step skipped |
 
-Not executed here: `pip install "git+https://…#subdirectory=sdk"`, which is only interesting
-for a commit newer than the last tag. Everything else above ran against the published v0.2.1
-release, the GitHub Actions runs for it, PyPI and ghcr.io.
+Not executed here: `npm publish` (needs the `NPM_TOKEN` secret) and the `memorydb-langchain`
+PyPI name, which is one pending publisher plus one run away. Everything else above ran
+against the published v0.2.1 release, the GitHub Actions runs for it, PyPI and ghcr.io.
 
 ## Verified failure and consistency cases
 

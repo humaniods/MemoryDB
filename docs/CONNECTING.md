@@ -167,7 +167,7 @@ Tools the agent gets: `memorydb_health`, `memorydb_search`, `memorydb_list_memor
 
 ```python
 from memorydb import MemoryDB
-from memorydb_langchain import MemoryDBChatMessageHistory  # pip install memorydb-langchain
+from memorydb_langchain import MemoryDBChatMessageHistory  # pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk/langchain"
 
 history = MemoryDBChatMessageHistory(session_id="user-42", client=MemoryDB())
 history.add_message(HumanMessage("What is the capital of Rajasthan?"))

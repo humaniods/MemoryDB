@@ -80,7 +80,7 @@ node examples/node_quickstart.mjs
     "env": {"MEMORYDB_URL": "memorydb://TOKEN@127.0.0.1:8080"}}}}
   ```
   Tools exposed: health, search, list/add memories, ingest, create collection, query documents.
-- **LangChain** (`pip install memorydb-langchain`, or `pip install -e sdk/langchain` from a clone):
+- **LangChain** (`pip install "git+https://github.com/humaniods/MemoryDB.git#subdirectory=sdk/langchain"`, or `pip install -e sdk/langchain` from a clone; the `memorydb-langchain` PyPI name is the next round):
   `MemoryDBChatMessageHistory` — drop-in chat history; every append is an immutable
   revision, so `db.objects.history(pk=...)` is a free audit trail. See `examples/langchain_demo.py`.
 
