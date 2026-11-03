@@ -38,10 +38,22 @@ def load_db(args):
     return MemoryDB(url, token=token)
 
 
-def read_json_arg(value, path):
-    if path:
+def read_json_file(path):
+    """Read a JSON input file named on the command line.
+
+    Paths in these commands come from README and docs, so a wrong one has to name the
+    file instead of raising a traceback from wherever argparse happened to call us.
+    """
+    try:
         with open(path) as fh:
             return json.load(fh)
+    except OSError as exc:
+        sys.exit(f"mdb: cannot read {path}: {exc.strerror or exc}")
+
+
+def read_json_arg(value, path):
+    if path:
+        return read_json_file(path)
     if value:
         return json.loads(value)
     sys.exit("provide --json or --file")
@@ -337,12 +349,12 @@ def main(argv=None):
         elif args.cmd == "search":
             emit(db.objects.search(args.text, kind=args.kind, limit=args.limit))
         elif args.cmd == "ingest":
-            with open(args.file) as fh:
-                payload = json.load(fh)
-            emit(db.ingest(payload["messages"], facts=payload.get("facts"), source=payload.get("source", "cli")))
+            payload = read_json_file(args.file)
+            emit(db.ingest(payload["messages"], facts=payload.get("facts"),
+                           source=payload.get("source", "cli"),
+                           context=payload.get("context", "")))
         elif args.cmd == "tx":
-            with open(args.file) as fh:
-                payload = json.load(fh)
+            payload = read_json_file(args.file)
             emit(db.transaction(payload["changes"], idempotency_key=args.key))
         elif args.cmd == "sync":
             rows = read_json_arg(args.json, args.file)

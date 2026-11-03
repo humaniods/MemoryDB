@@ -1,0 +1,5 @@
+[
+  { "id": "c-201", "name": "Rajasthan Canal Foods", "region": "Rajasthan", "plan": "growth", "mrr": 41000 },
+  { "id": "c-202", "name": "Thar Wind Power", "region": "Rajasthan", "plan": "starter", "mrr": 9000 },
+  { "id": "c-203", "name": "Marwar Handicrafts", "region": "Rajasthan", "plan": "starter", "mrr": 6500 }
+]

@@ -142,8 +142,9 @@ mdb query customers --where region=Rajasthan --fields id,name,mrr
 mdb search "renewal" --limit 5      # BM25 + vectors, fused, over what you may read
 mdb memory add --kind fact --content "customer: plan = growth"
 mdb memory history --id <record-id> # every revision, oldest first
-mdb ingest --file call.json         # chat + evidence-linked facts
-mdb sync stripe --collection customers --key-field id --file customers.json
+# these two read the sample files that ship in this repository:
+mdb ingest --file examples/call.json    # chat + evidence-linked facts
+mdb sync stripe --collection customers --key-field id --file examples/customers.json
 mdb sources                         # which connectors exist, their rows and last sync
 ```
 
@@ -242,13 +243,13 @@ is what a mirror means.
 
 ```sh
 mdb demo                                    # seed a sample workspace through this same path
-mdb sync stripe --collection customers --key-field id --file customers.json
-mdb sync stripe --collection customers --key-field id --file customers.json --delete-missing
+mdb sync stripe --collection customers --key-field id --file examples/customers.json
+mdb sync stripe --collection customers --key-field id --file examples/customers.json --delete-missing
 mdb sources
 ```
 
-A second run of the same rows reports `{"created":0,"updated":0,"unchanged":3,"sequence":11}` -
-the same sequence it started at, because nothing was written. `examples/connectors_demo.py` does
+A second run of the same rows reports `"created": 0, "updated": 0, "unchanged": 3` and leaves the
+journal sequence exactly where it was - nothing was written. `examples/connectors_demo.py` does
 the whole cycle through the Python client.
 
 ## Supported operations

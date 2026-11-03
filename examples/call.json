@@ -1,0 +1,35 @@
+{
+  "source": "examples/call.json",
+  "context": "account",
+  "messages": [
+    { "role": "user", "content": "We are Thar Solar in Jodhpur, our plan is growth and we renew in March." },
+    { "role": "assistant", "content": "Got it - I'll keep those details on the account from now on." },
+    { "role": "user", "content": "One more thing: send our invoices in Hindi." }
+  ],
+  "facts": [
+    {
+      "subject": "customer:thar-solar",
+      "predicate": "plan",
+      "value": "growth",
+      "quote": "our plan is growth",
+      "message_index": 0,
+      "confidence": 0.95
+    },
+    {
+      "subject": "customer:thar-solar",
+      "predicate": "renewal",
+      "value": "March",
+      "quote": "we renew in March",
+      "message_index": 0,
+      "confidence": 0.9
+    },
+    {
+      "subject": "customer:thar-solar",
+      "predicate": "invoice_language",
+      "value": "Hindi",
+      "quote": "send our invoices in Hindi",
+      "message_index": 2,
+      "confidence": 0.8
+    }
+  ]
+}

@@ -100,21 +100,21 @@ conversation and its evidence-linked facts, and shows the records the engine wro
 ## 5. Documents with schemas
 
 ```python
-db.collections.create("customers", fields={"email": {"type": "string", "required": True},
-                                           "age": {"type": "integer"}},
+db.collections.create("contacts", fields={"email": {"type": "string", "required": True},
+                                          "age": {"type": "integer"}},
                       unique=["email"], indexes=["age"])
-Customer = db.collection("customers")
-Customer.objects.create(data={"email": "a@x.com", "age": 30})
-Customer.objects.filter(age__gte=18).order_by("-age").only("email").all()
+Contact = db.collection("contacts")
+Contact.objects.create(data={"email": "a@x.com", "age": 30})
+Contact.objects.filter(age__gte=18).order_by("-age").only("email").all()
 ```
 
 ## 6. Mirror a table without rewriting it every run
 
 ```bash
-mdb sync stripe --collection customers --key-field id --file customers.json
-#  {"created":3,"updated":0,"unchanged":0,"removed":0,"written":3,"sequence":11}
-mdb sync stripe --collection customers --key-field id --file customers.json
-#  {"created":0,"updated":0,"unchanged":3,"removed":0,"sequence":11}   <- nothing written, same journal sequence
+mdb sync stripe --collection customers --key-field id --file examples/customers.json
+#  created 3, updated 0, unchanged 0, written 3          <- every row was new
+mdb sync stripe --collection customers --key-field id --file examples/customers.json
+#  created 0, updated 0, unchanged 3, no "written" key   <- nothing moved, journal sequence unchanged
 ```
 
 Each row keeps the hash of the data it was written from, so a cron that re-pulls a whole CSV,
