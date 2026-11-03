@@ -62,6 +62,20 @@ TOOL_DEFS = [
          "order_by": {"type": "string"}, "descending": {"type": "boolean"},
          "projection": {"type": "array", "items": {"type": "string"}},
          "limit": {"type": "integer", "default": 50}}, "required": ["collection"]}},
+    {"name": "memorydb_sync", "description": "Mirror a table/CSV/REST list into a collection. Only rows whose data changed are written; re-running is cheap.",
+     "inputSchema": {"type": "object", "properties": {
+         "source": {"type": "string", "description": "connector name, e.g. stripe or postgres"},
+         "collection": {"type": "string"},
+         "key_field": {"type": "string", "default": "id"},
+         "items": {"type": "array", "items": {"type": "object", "properties": {
+             "data": {"type": "object"}, "content": {"type": "string"}}},
+             "description": "up to 500 rows; each row must carry key_field"},
+         "delete_missing": {"type": "boolean", "default": False}},
+         "required": ["source", "collection", "items"]}},
+    {"name": "memorydb_list_sources", "description": "List the connectors that own rows in this workspace, with row counts and last sync time.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "memorydb_demo", "description": "Load the built-in sample workspace (four mirrored tables, notes and facts) so the console and search have data. Idempotent.",
+     "inputSchema": {"type": "object", "properties": {}}},
 ]
 
 
@@ -93,6 +107,14 @@ def handle(db, method, params):
     if method == "memorydb_query_documents":
         q = {k: v for k, v in params.items() if k != "collection"}
         return db.request("POST", "query/" + params["collection"] + "/", q)
+    if method == "memorydb_sync":
+        return db.sources.sync(params["source"], collection=params["collection"], items=params["items"],
+                               key_field=params.get("key_field", "id"),
+                               delete_missing=params.get("delete_missing", False))
+    if method == "memorydb_list_sources":
+        return db.sources.all()
+    if method == "memorydb_demo":
+        return db.demo_seed()
     raise ValueError("unknown tool " + method)
 
 

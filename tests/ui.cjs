@@ -18,11 +18,25 @@ try{
  await page.locator('#data').fill(JSON.stringify({name:'UI document',count:1}));await page.locator('#save').click();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Document saved');
  await page.locator('#rows .row').click();await page.waitForFunction(()=>document.querySelector('#editTitle').textContent==='Edit document');await page.locator('#data').fill(JSON.stringify({name:'<script>window.attacked=true</script>',count:2}));await page.locator('#save').click();await page.waitForFunction(()=>document.querySelector('#rows').textContent.includes('window.attacked'));if(await page.evaluate(()=>window.attacked))throw Error('Stored XSS');
  await page.locator('#query').fill(JSON.stringify({where:[{field:'name',op:'eq',value:'<script>window.attacked=true</script>'}],limit:20}));await page.locator('#runQuery').click();await page.waitForFunction(()=>document.querySelector('#count').textContent.includes('equality index'));
+ const api=(p,m,b)=>fetch(`${base}/api/v1/${p}`,{method:m,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:b===undefined?undefined:JSON.stringify(b)}).then(r=>r.json());
+ await api('collections/','POST',{name:'seats',schema:{fields:{seat:{type:'string',required:true},flight:{type:'string'}},unique:['seat'],indexes:['flight']}});
+ const rowsOf=[{data:{seat:'12A',flight:'AI-114'}},{data:{seat:'12B',flight:'AI-114'}}];
+ const first=await api('sources/airline/sync/','POST',{collection:'seats',key_field:'seat',items:rowsOf});
+ if(first.created!==2)throw Error('connector sync: '+JSON.stringify(first));
+ const again=await api('sources/airline/sync/','POST',{collection:'seats',key_field:'seat',items:rowsOf});
+ if(again.written||again.sequence!==first.sequence)throw Error('identical resync wrote rows: '+JSON.stringify(again));
+ await page.locator('#refresh').click();await page.waitForFunction(()=>[...document.querySelectorAll('#collection option')].some(o=>o.value==='seats'));
+ await page.locator('#query').fill(JSON.stringify({limit:20}));await page.selectOption('#collection','seats');
+ await page.waitForFunction(()=>document.querySelector('#rows').textContent.includes('mirrored from airline'));
+ const lines=await page.evaluate(()=>[...document.querySelectorAll('#rows .row small')].map(s=>s.textContent));
+ if(lines.length!==2||!lines.every(t=>t.includes('mirrored from airline')))throw Error('provenance lines: '+JSON.stringify(lines));
+ await page.selectOption('#collection','items');await page.waitForFunction(()=>document.querySelector('#rows').textContent.includes('UI document')||document.querySelector('#count').textContent.includes('matching'));
+ if(await page.evaluate(()=>[...document.querySelectorAll('#rows .row small')].some(s=>s.textContent.includes('mirrored from'))))throw Error('manual row marked as mirrored');
  if(process.env.UI_SCREENSHOT)await page.screenshot({path:process.env.UI_SCREENSHOT,fullPage:true});
  await page.locator('nav button[data-view="ingestion"]').click();await page.locator('#runIngest').click();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Memory ingested');
  await page.locator('#queueIngest').click();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Job queued');await page.locator('nav button[data-view="jobs"]').click();await page.waitForSelector('#jobRows button');await page.locator('#jobRows button').click();await page.waitForFunction(()=>document.querySelector('#jobRows').textContent.includes('done'));
  await page.setViewportSize({width:390,height:844});if(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1))throw Error('Mobile overflow');
  await page.goto(base+'/studio/');await page.locator('#connect').click();await page.locator('#token').fill(token);await page.locator('#authForm button').first().click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Connected'));await page.locator('#content').fill('Browser-created fact');await page.locator('#save').click();await page.waitForFunction(()=>document.querySelector('#list').textContent.includes('Browser-created fact'));
- if(errors.length)throw Error(errors.join('\n'));console.log('Browser: connect, schema, CRUD, indexed query, stored-XSS escaping, ingest, jobs, mobile layout, memory Studio: PASS');
+ if(errors.length)throw Error(errors.join('\n'));console.log('Browser: connect, schema, CRUD, indexed query, stored-XSS escaping, connector sync no-op + provenance lines, ingest, jobs, mobile layout, memory Studio: PASS');
 }finally{if(browser)await browser.close();if(server){server.kill('SIGTERM');await new Promise(r=>server.once('exit',r))}fs.rmSync(tmp,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});

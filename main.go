@@ -389,6 +389,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.sourceRoutes(w, r) {
+		return
+	}
+	if s.demoRoute(w, r) {
+		return
+	}
 	if s.memoryRoutes(w, r) {
 		return
 	}

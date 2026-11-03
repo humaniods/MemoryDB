@@ -26,7 +26,7 @@ server keeps the full trail:
 
 ```python
 db = MemoryDB()
-db.objects.history(pk=history.record_id)["results"]   # versions 1..n, a free audit log
+db.objects.history(pk=history.record_id)   # versions 1..n, oldest first, a free audit log
 ```
 
 Use one principal (token) per deployed product so sessions of different products land in

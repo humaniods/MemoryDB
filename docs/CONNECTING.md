@@ -2,7 +2,8 @@
 
 Step-by-step recipes for the ways a developer consumes a database:
 server-side SDK, browser frontend, AI agent (MCP), framework memory (LangChain),
-and a Django drop-in that replaces the cache and session stores.
+a Django drop-in that replaces the cache and session stores, and a connector that mirrors
+a table you already own.
 
 Every client speaks one connection string:
 
@@ -159,7 +160,8 @@ block — no code at all:
 
 Tools the agent gets: `memorydb_health`, `memorydb_search`, `memorydb_list_memories`,
 `memorydb_add_memory`, `memorydb_ingest` (evidence-linked facts),
-`memorydb_create_collection`, `memorydb_query_documents`.
+`memorydb_create_collection`, `memorydb_query_documents`, `memorydb_sync`,
+`memorydb_list_sources`, `memorydb_demo`.
 
 ---
 
@@ -219,6 +221,65 @@ What that buys you over the stock database-backed stores:
 Not covered, by design: this is not `django.db.backends`. Models, migrations, the admin,
 queries via the ORM and `manage.py` still need Postgres/SQLite - MemoryDB speaks JSON documents,
 not SQL.
+
+---
+
+## F. Mirroring a table you already own (connector)
+
+If Postgres, a CSV on S3, or a REST list is the source of truth and you want it searchable and
+graph-linked here, push it under a connector name. MemoryDB remembers one SHA-256 per row, so a
+nightly re-sync writes only the rows whose data actually moved - an identical re-run writes
+nothing and does not even advance the journal.
+
+```bash
+mdb sync nightly-postgres --collection customers --key-field id --file customers.json
+mdb sources                       # which connectors own rows here, and when they last synced
+```
+
+The same call from Python, with `delete_missing` tombstoning rows the source dropped:
+
+```python
+from memorydb import MemoryDB
+db = MemoryDB()                                    # MEMORYDB_URL
+report = db.sources.sync("nightly-postgres", collection="customers", key_field="id",
+                         items=[{"data": row} for row in rows], delete_missing=True)
+# {'created': 2, 'updated': 1, 'unchanged': 597, 'removed': 0, 'written': 3, 'sequence': 41}
+```
+
+Raw HTTP, for a cron job or a CI step that has no SDK:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $MEMORYDB_TOKEN" -H "Content-Type: application/json" \
+  -d '{"collection":"customers","key_field":"id","items":[{"data":{"id":"c-1","mrr":48000}}]}' \
+  "$MEMORYDB_URL/api/v1/sources/nightly-postgres/sync/"
+```
+
+What each mirrored row carries, and what the console prints on it:
+
+- `metadata.connector`, `metadata.connector_key`, `metadata.source_hash`, `metadata.synced_at`;
+- `source: "sync:<connector>"` and `layer: "mirror"`, so `mdb search` and the graph can tell a
+  mirrored row from a memory your agent wrote;
+- `content` rendered from the row (`id: c-1 | mrr: 48000 | …`), which is what BM25 indexes - pass
+  an explicit `content` per item to control that text.
+
+The guardrails are the point of the design. A key that a different connector - or a direct write -
+already owns is refused rather than taken over. Inside a connector the comparison is against the
+payload this connector last sent, not against the row's current values, so a hand edit survives a
+sync of an unchanged source and is replaced by the source's new value as soon as that row changes
+upstream - and neither edit is ever deleted, every step is a revision under
+`memories/<id>/history/`. A key repeated inside one payload is refused, and a reader token cannot
+sync at all. One request carries at most 500 rows with keys up to 128 characters
+inside a 4 MiB body, and `delete_missing` scans up to 20000 existing rows, so page large sources
+yourself (read the source, sync a slice, repeat with the same connector and no `delete_missing`
+until the final slice).
+
+This is polling-and-hash mirroring, not change-data-capture: there is no hosted service that
+watches Stripe or Postgres for you, and nothing arrives between your runs. Run the extractor
+yourself - a scheduled job, GitHub Action or `cron` that reads the source and calls `mdb sync`.
+
+`mdb demo` is the same code path with built-in data: four mirrored tables, notes, and
+evidence-linked facts, seeded once and left alone on the next run, so a fresh install has
+something to click in the console and search before your own data arrives.
 
 ---
 

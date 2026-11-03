@@ -22,6 +22,9 @@ Some record ownership failures currently return 400 rather than 403.
 | POST | `ingest/` | Conversation + facts or extract flag; records result |
 | POST | `jobs/` | Queue ingestion body; returns durable job |
 | POST | `jobs/ID/run/` | Process/retry owned job |
+| POST | `sources/NAME/sync/` | `{collection,key_field,items:[{data,content?}],delete_missing?}`; mirrors a table and writes only changed rows |
+| GET | `sources/` | Connectors that own rows, with counts and last sync time |
+| POST | `demo/` | Seed the built-in sample workspace (admin); idempotent |
 | POST | `wiki/` | `{text,source,title}`; source-preserving paragraphs |
 | POST | `graph/` | `{id,reverse,depth,limit}` scoped BFS |
 | POST | `code/index/` | `{repository,branch,commit,files:{path:GoSource}}` |
@@ -173,3 +176,39 @@ fields include source,layer,parent,links,metadata (string values),vector,
 embedding_model,expires (RFC3339),visibility,readers,agents. Links must resolve to
 active records readable by the record owner at write time. Deletion can leave
 historical dangling links; traversal filters unreadable/inactive targets.
+
+## Connectors and incremental sync
+
+`POST sources/NAME/sync/` mirrors one external table into one collection:
+
+```json
+{"collection":"customers","key_field":"id","items":[{"data":{"id":"c-1","name":"Rani Textiles","mrr":48000}}],"delete_missing":false}
+```
+
+Each written row stores `metadata.connector`, `metadata.connector_key` and the SHA-256 of
+its data plus content, so the next sync of the same table writes only the rows whose values
+actually moved: an unchanged row is reported under `unchanged` and costs no journal frame.
+The comparison is against the payload stored at that key's last sync, not against the row as
+it currently reads - a direct edit to a mirrored row is reported `unchanged` until the source
+row itself changes, and is then replaced, with the edited value kept as a revision.
+Re-running a 500-row pull that changed nothing advances the transaction sequence by zero.
+
+The reply reports `connector`, `collection`, `key_field`, `created`, `updated`, `unchanged`,
+`removed`, `rows_in_source`, `synced_at` and the engine's `sequence`; `written` appears only
+when the sync actually committed changes. In the console, a row with connector metadata is
+labeled `mirrored from <connector> @ <synced_at>` under its data.
+
+- `content` is optional; without it the row gets deterministic `field: value` text, which is
+  what hybrid search indexes, so mirrored rows are searchable without a title column.
+- Mirrored rows are documents, so they are read with `query/`/`documents/` and searched with
+  `search/` using `kind:document`. The default memory search excludes documents on purpose.
+- A key that already exists in the collection from a different connector or from a direct
+  write is refused rather than overwritten, and only a row's owner (or an admin) may resync
+  it — a sync cannot take over data it did not write.
+- `delete_missing:true` tombstones this connector's rows that the source dropped; rows the
+  source still lists are kept. A changed row becomes a new immutable revision, so
+  `memories/ID/history/` shows exactly what the source looked like before.
+- Limits: 1..500 rows per request, keys up to 128 characters, 4 MB body, collections up to
+  20000 rows scanned per sync. `GET sources/` lists the connectors that own visible rows.
+- `POST demo/` (admin) seeds a sample workspace through the same connector path, so it is
+  re-syncable; a second call reports `seeded:false` instead of duplicating data.

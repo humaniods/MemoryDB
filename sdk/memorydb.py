@@ -59,6 +59,28 @@ def parse_connection_string(connection_string):
     return scheme + "://" + host + ":" + str(port), unquote(parts.username)
 
 
+class SourceManager:
+    """Mirror an external table into a collection.
+
+    A sync writes only the rows whose data changed since the last sync, so a cron job
+    that re-pulls a whole CSV or REST list costs one read, not a rewrite of every row.
+    """
+
+    def __init__(self, client):
+        self.client = client
+
+    def sync(self, name, *, collection, items, key_field="id", delete_missing=False, source="", idempotency_key=None):
+        """items is a list of dicts (one row each) or of {"data": {...}, "content": "..."} pairs."""
+        rows = [{"data": i, "content": ""} if isinstance(i, dict) and "data" not in i else i for i in items]
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        return self.client.request("POST", "sources/" + quote(name, safe="") + "/sync/",
+                                   dict(collection=collection, key_field=key_field, items=rows,
+                                        delete_missing=delete_missing, source=source), headers=headers)
+
+    def all(self):
+        return self.client.request("GET", "sources/")["results"]
+
+
 class MemoryDB:
     def __init__(self, url="http://127.0.0.1:8080", *, token=None, timeout=35):
         if token is None:
@@ -74,6 +96,7 @@ class MemoryDB:
         self.timeout = timeout
         self.objects = MemoryManager(self)
         self.collections = CollectionManager(self)
+        self.sources = SourceManager(self)
 
     @classmethod
     def from_url(cls, connection_string, **fields):
@@ -94,6 +117,13 @@ class MemoryDB:
 
     def queue_ingest(self, **payload):
         return self.request("POST", "jobs/", payload)
+
+    def demo_seed(self):
+        """Load the built-in sample workspace (four mirrored tables, notes and facts).
+
+        Safe to call twice: a workspace that already has the sample is left alone.
+        """
+        return self.request("POST", "demo/", None)
 
     def request(self, method, path, body=None, headers=None):
         req = Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,

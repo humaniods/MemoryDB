@@ -1,5 +1,5 @@
 """Actual process + network + Python SDK integration; no persistent test data."""
-import os, subprocess, tempfile, sys, time, socket
+import os, subprocess, tempfile, sys, time, socket, json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'sdk'))
@@ -53,6 +53,16 @@ with tempfile.TemporaryDirectory() as td:
         expect_status(409, lambda: users.all().page(cursor=page['next_cursor'],limit=1))
         users.delete(pk=a['id'],version=2)
         expect_status(404,lambda: users.get(pk=a['id']))
+        # The mdb CLI is what the server's demo hints tell you to type, so it runs here:
+        # the field=value shorthand, and a clean refusal when the term is neither.
+        def mdb(*argv):
+            return subprocess.run([sys.executable,str(ROOT/'sdk'/'cli.py'),*argv],capture_output=True,text=True,
+                                  env={**os.environ,'MEMORYDB_URL':f'memorydb://{token}@127.0.0.1:{port}'})
+        ok=mdb('query','users','--where','email=b','--fields','age')
+        assert ok.returncode==0, ok.stderr
+        assert json.loads(ok.stdout)['results'][0]['data']=={'age':30}
+        bad=mdb('query','users','--where','nonsense')
+        assert bad.returncode==1 and '--where' in bad.stderr, (bad.returncode, bad.stderr)
         # Widen a live collection the way ALTER TABLE ADD COLUMN does, then prove the new field
         # is queryable and that a schema the current rows cannot satisfy is refused.
         db.collections.alter('users', fields={'nickname':{'type':'string'}}, indexes=['nickname'])
@@ -77,6 +87,6 @@ with tempfile.TemporaryDirectory() as td:
         for extra in (['-verify'],['-backup',backup],['-compact','1'],['-verify']):
             subprocess.run([binary,'-data',td+'/test.wal',*extra],check=True,capture_output=True)
         subprocess.run([binary,'-data',td+'/restored.wal','-restore',backup],check=True,capture_output=True)
-        print('HTTP + Python SDK: auth, CRUD, schema, indexes, pagination, transaction rollback, retry, ingestion, jobs, restart, backup/restore: PASS')
+        print('HTTP + Python SDK + mdb CLI: auth, CRUD, schema, indexes, pagination, transaction rollback, retry, ingestion, jobs, restart, backup/restore: PASS')
     finally:
         if p.poll() is None:p.terminate();p.wait(timeout=5)

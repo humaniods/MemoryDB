@@ -53,6 +53,37 @@ Not executed here: `npm publish`, which needs a stored `NPM_TOKEN` secret becaus
 trusted-publishing equivalent, and that secret has not been created. Everything else above ran
 against the published v0.2.1 release, the GitHub Actions runs for it, PyPI and ghcr.io.
 
+## Connector mirroring and the sample seed (3 November 2026)
+
+The 28 October table above predates `sources.go`. This is what ran for the connector and demo
+work, on a fresh server built from this tree (Go 1.18.1, loopback HTTP, throwaway journal):
+
+| Check | Result |
+|---|---|
+| `go vet ./...` + `gofmt -e` | PASS, no findings |
+| `go test -race -coverprofile=... ./...` | PASS: **36** engine/API tests (5 new in `sources_test.go`) + 1 Go client test; **73.4%** engine statement coverage (was 68.8%), 41.2% for `sdk/goclient` |
+| `TestConnectorSyncWritesOnlyChangedRows` | PASS — an identical re-sync leaves `engine.Sequence()` untouched, so a no-op costs no journal frame |
+| `TestConnectorComparesAgainstTheLastPayloadSynced` | PASS — a console edit to a mirrored row survives a sync of an unchanged source (reported `unchanged`, not reverted), and is replaced by the source's new value once that row moves upstream, with the edited value kept as a revision in `memories/ID/history/` |
+| `TestConnectorRefusesToRewriteForeignRows` | PASS — a key another connector wrote is not taken over |
+| `TestConnectorInputLimitsAndPermissions` | PASS — reader token 403, invalid connector name, duplicate key inside one payload, missing collection, empty sync |
+| `TestDemoSeedIsRepeatableAndSearchable` | PASS — second `POST demo/` reports `seeded:false`; the seeded tables, facts and `region` index stay queryable |
+| `mdb demo` on a fresh database | PASS — `{"seeded":true,"rows":{"customers":6,"invoices":8,"subscriptions":6,"support_tickets":6},"documents":6,"memories":4}`, one source listed as `acme-sample` with 26 rows; re-running printed `{"seeded":false,"reason":"the sample customers collection already exists"}` |
+| `mdb sync` twice with the same file | PASS — first run `{"unchanged":6,"created":0,"updated":0}`, second run identical, health `sequence` **7 before and 7 after** |
+| `mdb sync --delete-missing` with one row changed and one dropped | PASS — `{"updated":1,"removed":1,"unchanged":4,"written":2,"sequence":8}`: two changes, one transaction, then a re-run that reports `unchanged:5` and holds at sequence 8 |
+| Provenance on the written row | PASS — `metadata{connector, connector_key, source_hash, synced_at}`, `source: "sync:acme-sample"`, `layer: "mirror"`, and `memories/<id>/history/` shows `[(1, 12500), (2, 16500)]` for the edited row |
+| Indexes and search still work on mirrored rows | PASS — `mdb query customers --where region="Rajasthan"` plans `equality index: region`; `mdb search Thar --kind document` returns the mirrored row on its rendered `content` |
+| Cross-connector overwrite over HTTP and MCP | PASS — both refuse with `key c-104 already exists in customers (written by connector acme-sample)`, no write, no sequence move |
+| Payload strictness | PASS — a bare row object is rejected at the HTTP boundary (`json: unknown field "id"`); `{"data": …}` is required there, while the Python client and `mdb sync` normalize bare dicts for you |
+| MCP server | PASS — `tools/list` returns **10** tools including `memorydb_sync`, `memorydb_list_sources`, `memorydb_demo`; both new read tools answered over stdio |
+| `python3 examples/connectors_demo.py` | PASS — create 3 (`written:3`, sequence 11) → identical resync (`unchanged:3`, sequence 11) → changed plus `delete_missing` (`updated:1, removed:1, written:2`, sequence 12), then provenance, revisions, `sources.all()` and a `kind=document` search |
+| `node tests/ui.cjs` in headless Chromium | PASS, now also covering the connector path: sync 2 rows through `sources/airline/sync/`, an identical re-sync that writes nothing and does not move the sequence, both mirrored rows carrying `mirrored from airline @ <synced_at>` in the console, and a hand-written document in another collection showing **no** such label |
+| `python3 tests/smoke.py` | PASS — no regression in auth, CRUD, schema, indexes, pagination, rollback, ingestion, jobs, restart or backup/restore; it now also runs `sdk/cli.py` as a subprocess against the live server, so the CLI's `--where` shorthand and its refusal are covered there |
+| Browser screenshot of the provenance line | PASS — inspected at 1440px against a demo-seeded workspace: the mirrored row reads `Version 1 · local-user · mirrored from acme-sample @ 2026-11-03 05:33:05`, while a hand-written row in the same result keeps the plain `Version 1 · local-user` line |
+| `mdb query --where` accepts what the server's own hints print | PASS after the fix — the demo reply suggests `mdb query customers --where region="Rajasthan"`, which previously died on `json.loads` with a raw traceback; the shorthand (quoted or bare, comma- or `and`-separated, numeric values coerced) now resolves to the same equality terms, still plans `equality index: region`, the JSON form is unchanged, and a term that is neither exits `1` with `mdb: --where wants JSON like […] or field=value terms`. Covered in `tests/smoke.py` |
+| `mdb memory history --id` | PASS after the fix — the client already unwraps `results`, so the CLI's second unwrap raised `TypeError: list indices must be integers or slices, not str`; it now prints revisions 1..n, oldest first |
+| Every command in the README's *Everyday commands* block | RAN — `health`, `demo`, `collections ls`, `collections create`, `query` (both `--where` forms, `--fields`), `search`, `memory add/ls/history`, `doc add/get/patch/rm`, `ingest --file`, `tx --file --key`, `sync` twice, `sources`, against a live server built from this tree, each with the payload shape now named in `mdb <cmd> --help` |
+| README images | PASS — `node tests/screenshots.cjs` builds the server from this tree, seeds `mdb demo`, drives the real console and Studio in headless Chromium and writes the four PNGs; each was opened and read back before being linked, and `docs/QUICKSTART.md` carries the other two |
+
 ## Verified failure and consistency cases
 
 Atomic batch rollback, duplicate unique values under concurrent writes, exact
@@ -74,7 +105,10 @@ pagination, transaction rollback, idempotent creates, ingestion, job processing,
 server restart, CLI verify/backup/compaction/restore.
 
 Browser smoke: connect, create collection, create/edit document, indexed query,
-render stored script-like text without executing it, evidence ingestion, queue
+render stored script-like text without executing it, connector sync through the HTTP API
+(two rows created, an identical re-sync that writes nothing and leaves the transaction
+sequence where it was) and the `mirrored from <connector>` line on every mirrored row but
+on no hand-written one, evidence ingestion, queue
 and run job, mobile overflow check, memory Studio creation. No browser page errors
 were observed. Tests are development tooling; browser packages are not runtime
 server dependencies. The test names describe only what their assertions cover.
@@ -88,3 +122,9 @@ support. TLS configuration exists but the integration harness uses loopback HTTP
 The CI definition is included but its remote execution is unverified. Coverage
 is not proof of correctness or security; all edge cases and zero bugs are not
 claimed. See FEATURES.md for unimplemented capabilities.
+
+For the connector work specifically: no third-party service was ever contacted. Sources were
+local JSON files and the built-in sample, so "mirrors Postgres/Stripe" describes the shape of
+the API, not a tested integration - and a source that changes between two syncs, a key field
+that is not unique, or a table larger than the 500-row request limit is the caller's paging
+problem, not something verified here.

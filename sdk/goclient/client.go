@@ -58,6 +58,7 @@ func ConnectEnv() (*Client, error) {
 	}
 	return Connect(raw)
 }
+
 type Error struct {
 	Status  int
 	Message string

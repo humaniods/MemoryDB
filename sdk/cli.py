@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -48,6 +49,37 @@ def read_json_arg(value, path):
 
 def emit(obj):
     print(json.dumps(obj, indent=2, default=str))
+
+
+def parse_where(value):
+    """Accept the API's JSON for --where, and the field=value shorthand `mdb demo` prints.
+
+    Shell quoting is fiddly enough that a hint has to work exactly as typed, so
+    region="Rajasthan" and region=Rajasthan both mean one equality term.
+    """
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return [parsed]
+    if isinstance(parsed, list):
+        return parsed
+    terms = []
+    for chunk in re.split(r",|\s+and\s+", value.strip()):
+        field, sep, raw = chunk.strip().partition("=")
+        if not sep or not field.strip():
+            sys.exit('mdb: --where wants JSON like [{"field":"region","op":"eq","value":"Rajasthan"}] '
+                     "or field=value terms, got: " + value)
+        raw = raw.strip().strip("\"'")
+        for cast in (int, float):
+            try:
+                raw = cast(raw)
+                break
+            except ValueError:
+                continue
+        terms.append({"field": field.strip(), "op": "eq", "value": raw})
+    return terms
 
 
 # -- mdb serve: the database itself, installed over pip, with no Go or git -----------------
@@ -226,7 +258,7 @@ def main(argv=None):
     p.add_argument("--json"); p.add_argument("--file"); p.add_argument("--version", type=int)
 
     p = sub.add_parser("query"); p.add_argument("collection")
-    p.add_argument("--where", default="[]"); p.add_argument("--order"); p.add_argument("--desc", action="store_true")
+    p.add_argument("--where", default="[]", help='[{"field":…,"op":…,"value":…}] or region=Rajasthan shorthand'); p.add_argument("--order"); p.add_argument("--desc", action="store_true")
     p.add_argument("--limit", type=int, default=50); p.add_argument("--fields", help="comma-separated projection")
 
     p = sub.add_parser("memory"); p.add_argument("action", choices=["add", "ls", "history"])
@@ -236,8 +268,19 @@ def main(argv=None):
     p = sub.add_parser("search"); p.add_argument("text")
     p.add_argument("--kind", default=""); p.add_argument("--limit", type=int, default=10)
 
-    p = sub.add_parser("ingest"); p.add_argument("--file", required=True)
-    p = sub.add_parser("tx"); p.add_argument("--file", required=True); p.add_argument("--key")
+    p = sub.add_parser("ingest"); p.add_argument("--file", required=True, help='{"messages":[…],"facts":[…],"source":…}')
+    p = sub.add_parser("tx"); p.add_argument("--file", required=True, help='{"changes":[{"record":…,"expected":N}]}'); p.add_argument("--key")
+
+    p = sub.add_parser("sync", help="mirror an external table; writes only the rows that changed")
+    p.add_argument("source"); p.add_argument("--collection", required=True)
+    p.add_argument("--file", help="JSON array of rows (or objects with data/content)")
+    p.add_argument("--json", help="the same array inline")
+    p.add_argument("--key-field", default="id"); p.add_argument("--delete-missing", action="store_true")
+    p.add_argument("--tag", dest="source_tag", default="", help="value stored as the row's source")
+    p.add_argument("--idempotency-key")
+
+    p = sub.add_parser("sources"); p.add_argument("action", choices=["ls"], nargs="?", default="ls")
+    p = sub.add_parser("demo", help="load the built-in sample workspace into the server")
 
     p = sub.add_parser("serve", help="install (if needed) and run the MemoryDB server")
     p.add_argument("--addr", default="127.0.0.1:8080")
@@ -277,7 +320,7 @@ def main(argv=None):
             else:
                 emit(db.collection(args.collection).objects.delete(pk=args.id, version=args.version))
         elif args.cmd == "query":
-            q = {"where": json.loads(args.where), "limit": args.limit}
+            q = {"where": parse_where(args.where), "limit": args.limit}
             if args.order:
                 q["order_by"] = args.order
                 q["descending"] = args.desc
@@ -290,7 +333,7 @@ def main(argv=None):
             elif args.action == "ls":
                 emit(db.objects.filter(kind=args.kind if args.kind != "fact" else "", source=args.source, q=args.q, limit=args.limit))
             else:
-                emit(db.objects.history(pk=args.id)["results"])
+                emit(db.objects.history(pk=args.id))
         elif args.cmd == "search":
             emit(db.objects.search(args.text, kind=args.kind, limit=args.limit))
         elif args.cmd == "ingest":
@@ -301,6 +344,17 @@ def main(argv=None):
             with open(args.file) as fh:
                 payload = json.load(fh)
             emit(db.transaction(payload["changes"], idempotency_key=args.key))
+        elif args.cmd == "sync":
+            rows = read_json_arg(args.json, args.file)
+            if not isinstance(rows, list):
+                sys.exit("sync input must be a JSON array of rows")
+            emit(db.sources.sync(args.source, collection=args.collection, items=rows,
+                                 key_field=args.key_field, delete_missing=args.delete_missing,
+                                 source=args.source_tag, idempotency_key=args.idempotency_key))
+        elif args.cmd == "sources":
+            emit(db.sources.all())
+        elif args.cmd == "demo":
+            emit(db.demo_seed())
     except MemoryDBError as exc:
         sys.exit(f"mdb error [{exc.status}]: {exc}")
     return 0
