@@ -58,6 +58,7 @@ curl -s -H "Authorization: Bearer $MEMORYDB_TOKEN" http://127.0.0.1:8080/api/v1/
 
 # CLI (pip install superb-memory provides `mdb`)
 mdb health
+mdb demo                      # load the sample workspace: 4 tables, notes, facts
 mdb memory add --kind fact --content "user ships on fridays"
 mdb search "fridays"
 
@@ -73,6 +74,16 @@ node examples/node_quickstart.mjs
 # Go — goclient.Connect("memorydb://TOKEN@127.0.0.1:8080")
 ```
 
+**In the browser**, the same server serves two UIs. The console's *Memory ingestion* tab posts a
+conversation and its evidence-linked facts, and shows the records the engine wrote:
+
+![The console's Memory ingestion tab: a chat and two facts with their quotes pasted as JSON, and the records returned below](../.github/assets/console-ingest.png)
+
+*Graph explorer* walks the links those records create from any root record, and *Memory studio*
+(`/studio/`) is where you browse a memory by kind, edit it and read its revisions.
+
+![The console's Graph explorer returning the traversed records as JSON](../.github/assets/console-graph.png)
+
 ## 4. Give your AI agent the database
 
 - **MCP server** (any MCP client — Claude Desktop, Qoder, IDEs):
@@ -80,7 +91,8 @@ node examples/node_quickstart.mjs
   {"mcpServers": {"memorydb": {"command": "memorydb-mcp",
     "env": {"MEMORYDB_URL": "memorydb://TOKEN@127.0.0.1:8080"}}}}
   ```
-  Tools exposed: health, search, list/add memories, ingest, create collection, query documents.
+  Tools exposed: health, search, list/add memories, ingest, create collection, query documents,
+  sync a mirrored table, list connectors, seed the sample.
 - **LangChain** (`pip install memorydb-langchain`, or `pip install -e sdk/langchain` from a clone):
   `MemoryDBChatMessageHistory` — drop-in chat history; every append is an immutable
   revision, so `db.objects.history(pk=...)` is a free audit trail. See `examples/langchain_demo.py`.
@@ -96,7 +108,31 @@ Customer.objects.create(data={"email": "a@x.com", "age": 30})
 Customer.objects.filter(age__gte=18).order_by("-age").only("email").all()
 ```
 
-## 6. Django: replace the cache and session stores in two lines
+## 6. Mirror a table without rewriting it every run
+
+```bash
+mdb sync stripe --collection customers --key-field id --file customers.json
+#  {"created":3,"updated":0,"unchanged":0,"removed":0,"written":3,"sequence":11}
+mdb sync stripe --collection customers --key-field id --file customers.json
+#  {"created":0,"updated":0,"unchanged":3,"removed":0,"sequence":11}   <- nothing written, same journal sequence
+```
+
+Each row keeps the hash of the data it was written from, so a cron that re-pulls a whole CSV,
+export or REST list writes only the rows whose values actually changed. Add
+`--delete-missing` when the source drops rows, and `mdb sources` lists the connectors that own
+data. A key already written by another connector or directly is refused, never overwritten, and
+a resync needs the row's owner (or an admin). The console labels every mirrored row
+(`mirrored from stripe @ <synced_at>`) so provenance is visible without an API call.
+`examples/connectors_demo.py` runs the whole
+cycle; `docs/API.md` documents the endpoint.
+
+```python
+db.sources.sync("stripe", collection="customers", key_field="id", items=rows)
+db.sources.sync("stripe", collection="customers", key_field="id", items=rows, delete_missing=True)
+db.sources.all()
+```
+
+## 7. Django: replace the cache and session stores in two lines
 
 ```bash
 pip install memorydb-django          # from a clone: pip install ./sdk ./sdk/django
