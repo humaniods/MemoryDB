@@ -14,6 +14,7 @@
   <a href="docs/QUICKSTART.md">Quickstart</a> ·
   <a href="docs/API.md">API</a> ·
   <a href="docs/CONNECTING.md">Connect an app or agent</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://pypi.org/project/superb-memory/">PyPI</a> ·
   <a href="LICENSE">MIT</a>
 </p>

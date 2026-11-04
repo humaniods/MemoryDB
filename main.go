@@ -30,7 +30,7 @@ var consoleUI []byte
 
 // Overridable with -ldflags "-X main.version=..." so a release build can stamp the
 // tag it was cut from, and `-version` can tell the operator which binary they have.
-var version = "0.2.4"
+var version = "0.2.5"
 
 type Principal struct {
 	TokenHash string `json:"token_sha256"`
@@ -357,7 +357,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			fail(w, errors.New("vector too large"))
 			return
 		}
-		respond(w, 200, map[string]any{"results": s.engine.Search(Query{User: s.user, Workspace: s.workspace, Text: q.Text, Vector: q.Vector, Kind: q.Kind, Source: q.Source, EmbeddingModel: q.Model, Agent: q.Agent, Limit: q.Limit})})
+		sq := Query{User: s.user, Workspace: s.workspace, Text: q.Text, Vector: q.Vector, Kind: q.Kind, Source: q.Source, EmbeddingModel: q.Model, Agent: q.Agent, Limit: q.Limit}
+		if err := s.engine.CheckVectorDims(sq); err != nil {
+			fail(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"results": s.engine.Search(sq)})
 		return
 	}
 	if strings.HasPrefix(path, "/api/v1/memories/") {

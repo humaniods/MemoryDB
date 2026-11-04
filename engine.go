@@ -624,6 +624,69 @@ type Hit struct {
 	Score  float64 `json:"score"`
 }
 
+// inScope reports whether the newest version of a record is a candidate for q: not
+// superseded or deleted, unexpired, visible in the caller's workspace, and passing the
+// kind/source/agent filters. Document, collection and job rows only qualify when the
+// query names a kind, so a bare search keeps returning memories.
+func inScope(r Record, q Query, now time.Time) bool {
+	if r.Metadata["status"] == "superseded" || (q.Kind == "" && (r.Kind == "document" || r.Kind == "collection" || r.Kind == "job")) {
+		return false
+	}
+	if r.Deleted || (r.Expires != nil && !r.Expires.After(now)) || !visible(r, q.User, q.Workspace) || (q.Agent != "" && len(r.Agents) > 0 && !contains(r.Agents, q.Agent)) || (q.Kind != "" && q.Kind != r.Kind) || (q.Source != "" && q.Source != r.Source) {
+		return false
+	}
+	return true
+}
+
+// vectorDims reports the distinct lengths of the stored vectors this query could compare
+// against. Cosine is undefined across lengths, so a query whose length appears nowhere can
+// never score anything. A query that names an embedding model is compared only against that
+// model's vectors, so only those lengths count; one that names no model sees every length in
+// scope.
+func (e *Engine) vectorDims(q Query) []int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	now := time.Now()
+	seen := map[int]bool{}
+	out := []int{}
+	for _, h := range e.records {
+		r := h[len(h)-1]
+		if !inScope(r, q, now) || len(r.Vector) == 0 {
+			continue
+		}
+		if q.EmbeddingModel != "" && q.EmbeddingModel != r.EmbeddingModel {
+			continue
+		}
+		if !seen[len(r.Vector)] {
+			seen[len(r.Vector)] = true
+			out = append(out, len(r.Vector))
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// CheckVectorDims rejects a query vector that cannot be compared with anything stored, so a
+// wrong-size embedding is an error at the API boundary rather than an empty result page.
+// A workspace holding no vectors at all stays silent: there is nothing to mismatch against.
+func (e *Engine) CheckVectorDims(q Query) error {
+	if len(q.Vector) == 0 {
+		return nil
+	}
+	dims := e.vectorDims(q)
+	if len(dims) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(dims))
+	for _, d := range dims {
+		if d == len(q.Vector) {
+			return nil
+		}
+		names = append(names, fmt.Sprintf("%d", d))
+	}
+	return fmt.Errorf("query vector has %d dimensions but the stored vectors have %s", len(q.Vector), strings.Join(names, " or "))
+}
+
 // Search scans the authorized partition. BM25 and exact cosine are fused by RRF.
 // There is no ANN index or learned reranker in this prototype.
 func (e *Engine) Search(q Query) []Hit {
@@ -637,10 +700,7 @@ func (e *Engine) Search(q Query) []Hit {
 	total := 0
 	for _, h := range e.records {
 		r := h[len(h)-1]
-		if r.Metadata["status"] == "superseded" || (q.Kind == "" && (r.Kind == "document" || r.Kind == "collection" || r.Kind == "job")) {
-			continue
-		}
-		if r.Deleted || (r.Expires != nil && !r.Expires.After(now)) || !visible(r, q.User, q.Workspace) || (q.Agent != "" && len(r.Agents) > 0 && !contains(r.Agents, q.Agent)) || (q.Kind != "" && q.Kind != r.Kind) || (q.Source != "" && q.Source != r.Source) {
+		if !inScope(r, q, now) {
 			continue
 		}
 		docs = append(docs, r)

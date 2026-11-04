@@ -45,6 +45,10 @@ Use a fresh key for each logical operation. See README for mutation retry limita
 Operators: `eq,ne,gt,gte,lt,lte,in,contains,icontains,prefix,iequals,exists`. Where
 predicates are ANDed. Nested fields use dot paths. Missing and null differ. No
 numeric string coercion.
+Every operator except `exists` also needs the field to be present, so a record lacking it
+never matches: `ne` means "has this field, with a different value", not "not equal, or
+absent" - the same NULL semantics SQL comparisons have. Use
+`{"field":"w","op":"exists","value":false}` to find the rows a comparison skips.
 `contains`/`prefix`/`eq` fold no case; `icontains` and `iequals` fold ASCII case, which
 is what SQLite's `LIKE` and `COLLATE NOCASE` do, so ported search and login lookups
 keep their behaviour. On arrays `contains`/`icontains` test membership, not substring;
@@ -95,6 +99,24 @@ before replacing it; saving a projection can otherwise drop unselected fields.
 `limit` max 500; default 50. Pass `next_cursor` as `cursor` with exactly the same
 query to continue. Mutations or changed active results return 409. `total` counts
 all matching readable documents, so a count is `total` with `limit:1`.
+
+## Search
+
+`POST search/` fuses BM25 over `content` with exact cosine over `vector` by reciprocal rank
+fusion, over the records the caller may read. `GET memories/?q=` runs the same scan with text
+only. Both answer `{"results":[{"record":…,"score":…}]}`, with and without a query - `score`
+is simply 0 for a record the query never scored.
+Cosine is only defined between two vectors of the same length, so a query vector whose length
+matches nothing stored in that scope is a 400 naming the lengths that are stored, instead of
+an empty page that hides the mistake:
+
+```json
+{"error":"query vector has 3 dimensions but the stored vectors have 4"}
+```
+
+A scope holding no vectors at all answers normally - there is no length to contradict yet.
+Records whose `embedding_model` differs from the query's score zero, so vectors from two
+models are never compared.
 
 ## Aggregation
 

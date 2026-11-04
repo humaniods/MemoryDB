@@ -78,11 +78,14 @@ MEMORYDB_URL=memorydb://my-app-token-here-1234@127.0.0.1:8080
 Node (dependency-free client, Node 18+):
 
 ```js
-import { MemoryDB } from 'memorydb'; // or ./sdk/node/index.mjs from a clone
+// The client is one dependency-free file; import it from a clone or copy it into your app.
+// It is not on npm yet, so there is no package name to install against.
+import { MemoryDB } from './sdk/node/index.mjs';
 const db = new MemoryDB(process.env.MEMORYDB_URL);
 
 await db.memories.create({ kind: 'fact', content: 'user prefers dark mode', source: 'web-app' });
 const hits = await db.search({ text: 'dark mode', limit: 5 });
+for (const { record, score } of hits.results) console.log(record.id, score);
 ```
 
 Python:

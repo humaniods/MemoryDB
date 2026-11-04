@@ -15,7 +15,7 @@ docker run -d --name memorydb -p 127.0.0.1:8080:8080 \
   -v memorydb-data:/data ghcr.io/humaniods/memorydb:latest
 
 # Installed binary (fetches the release archive for your OS/CPU and checks its checksum)
-curl -fsSL https://raw.githubusercontent.com/humaniods/MemoryDB/v0.2.4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/humaniods/MemoryDB/v0.2.5/install.sh | bash
 bash install.sh          # same script, from a clone: --source . builds instead of downloading
 export MEMORYDB_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 memorydb -data memory.wal -worker

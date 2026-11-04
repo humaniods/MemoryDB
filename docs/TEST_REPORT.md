@@ -186,6 +186,30 @@ matched their docs and the docs had run ahead of the code.
 | Tester's other findings, checked here | `{"fn":"count"}` → `400 unsupported aggregate count` (`aggFns`, `documents.go:646`); `docs/CONNECTING.md:81` really does show `import { MemoryDB } from 'memorydb'` while `sdk/node/package.json` names the package `superb-memory`, which npm has never published; a 3-dim query vector against 4-dim stored vectors really does return `{"results":[]}` with HTTP 200 |
 | One tester claim that does not hold | `GET memories/?q=` and the same call without `q` were reported as two different response shapes. Measured on a live server: **both** return `{"results":[{"record":…,"score":…}]}` - without a query `score` is just `0`. The defect is in the *typing*, not the API: `sdk/node/index.d.ts:40` declares `list(): Promise<{ results: Record[] }>`, so TypeScript readers are told to expect bare records (`history` at `:42` genuinely does return records, so the file is not wrong everywhere) |
 
+## The tester's rough edges, worked through (4 November 2026, unreleased)
+
+Four findings survived the check against the code and were fixed on `main`; they are **not in
+any published artifact yet**, so `pip install superb-memory==0.2.4` still has the old behaviour.
+
+| Fix | What changed and how it was verified |
+|---|---|
+| Wrong-size embedding was silent | A `search/` vector whose length matches nothing stored returned `200 {"results":[]}` - reproduced first against a `main` build: a 4-dim query scored, 3-dim and 5-dim both answered 200 with an empty page. Cosine is undefined across lengths, so `Engine.CheckVectorDims` (`engine.go`) now rejects it with `400 query vector has 3 dimensions but the stored vectors have 4`, and the handler calls it before searching. The comparison list is scoped the same way the search itself is (`inScope` is now shared instead of duplicated, so documents/collections/jobs, expiry, visibility and kind/source/agent filters all agree), and the model filter is honoured: naming a model with no stored vectors is not a dimension problem, and an empty scope stays silent because there is no length to contradict |
+| Tests at both levels | `TestSearchRejectsQueryVectorOfUnknownDimension` (engine, includes the "other user must not be rejected by vectors they cannot read" case) and `TestHTTPSearchRejectsWrongVectorDimension` (API boundary, the level the tester actually hit). The guard was then stubbed to `return nil` and the suite re-run to prove both tests really fail without it - the HTTP one reproduced the reported `200 {"results":[]}` exactly - before the condition was restored |
+| Node import in the docs | `docs/CONNECTING.md` showed `import { MemoryDB } from 'memorydb'`, which cannot resolve: the package is named `superb-memory` and npm has never published it. The block now imports `./sdk/node/index.mjs` and says so plainly, matching what `README.md:180` already admitted. Ran the rewritten block verbatim against a live server: it creates a memory, searches, and the `for (const {record, score} of hits.results)` line added to the snippet works |
+| Node typing for `memories.list` | `index.d.ts:40` now declares `{results: {record, score}[]}`, the shape `GET memories/` actually returns (measured with and without `q`, and through the Node client itself: `list shape record,score`) |
+| Missing-field semantics undocumented | Verified operator by operator on a live server rather than reasoning from the switch: every operator except `exists` needs the field present (`ne`/`eq`/`gt`/`gte`/`lt`/`lte`/`in` all skipped the row with no `w`, and `contains`/`prefix`/`icontains`/`iequals` cannot match a nil value). `docs/API.md` now states that `ne` means "has this field, with a different value", not "not equal or absent" - SQL NULL semantics - and points at `{"op":"exists","value":false}` for the rows a comparison skips. Also re-confirmed the missing/null split: a declared `integer` field refuses null outright (`400 invalid type for field w`), while an undeclared field set to null counts as present, so `ne` matches it and `exists:false` does not |
+
+`{"fn":"count"}` was filed as a gap and is not one: `aggFns` already answers
+`400 unsupported aggregate count`, and `groups[].count` is documented two lines below where
+the aggregate syntax is explained. `Search` gained no new behaviour for text queries - the
+guard fires only when a vector is sent.
+
+| Gate | Result |
+|---|---|
+| Local gates | PASS — `gofmt -l` clean, `go vet ./...` clean, `go test -race -count=1 -cover ./...` ok with coverage **74.1%** (was 73.6%), `python3 tests/smoke.py` PASS |
+| Live behaviour sweep | 26 checks on a fresh journal: empty scope accepts a vector query, correct length still scores with the unchanged `{record, score}` shape, unknown model and text-only searches untouched, `kind:document` gets its own length expectations, and the seven operator cases above. 24 passed first time; the 2 failures were my harness using a `"null": true` schema option that `Field` (`documents.go:20`) does not have - re-run correctly, the server behaved as documented |
+| Release state | Decided with the maintainer on 4 November 2026: this ships as **0.2.5**, a patch, with the 200→400 change called out in the new `CHANGELOG.md` rather than buried. The release notes on GitHub are static text produced by `release.yml`, which is why the changelog file exists - it is the only place a reader can see what a version changed. Verification of the published artifacts follows in the next section |
+
 ## Verified failure and consistency cases
 
 Atomic batch rollback, duplicate unique values under concurrent writes, exact

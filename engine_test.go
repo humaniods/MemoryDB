@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -198,6 +199,84 @@ func TestHTTPFlow(t *testing.T) {
 	}
 	if req("POST", "/api/v1/memories/", map[string]any{"unknown": "field"}, token, "").Code != 400 {
 		t.Fatal("unknown field accepted")
+	}
+}
+
+// A query vector whose length matches nothing stored can never score, because cosine is
+// undefined across dimensions. That has to be an error, not an empty page.
+func TestSearchRejectsQueryVectorOfUnknownDimension(t *testing.T) {
+	e, _ := openTest(t)
+	if err := e.CheckVectorDims(Query{User: "u", Workspace: "w", Vector: []float64{1, 2, 3}}); err != nil {
+		t.Fatalf("an empty workspace rejected a query: %v", err)
+	}
+	for _, v := range [][]float64{{1, 0, 0, 0}, {0, 1, 0, 0}} {
+		r := sample("prefers dark mode")
+		r.Vector = v
+		r.EmbeddingModel = "m1"
+		if _, err := e.Put(r, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.CheckVectorDims(Query{User: "u", Workspace: "w", Vector: []float64{1, 0, 0, 0}, EmbeddingModel: "m1"}); err != nil {
+		t.Fatalf("matching dimension rejected: %v", err)
+	}
+	err := e.CheckVectorDims(Query{User: "u", Workspace: "w", Vector: []float64{1, 0, 0}, EmbeddingModel: "m1"})
+	if err == nil || err.Error() != "query vector has 3 dimensions but the stored vectors have 4" {
+		t.Fatalf("got %v", err)
+	}
+	// A model with no vectors of its own has nothing to mismatch against.
+	if err := e.CheckVectorDims(Query{User: "u", Workspace: "w", Vector: []float64{1, 0, 0}, EmbeddingModel: "m2"}); err != nil {
+		t.Fatalf("unknown model rejected: %v", err)
+	}
+	// Two sizes under two models: a query naming no model sees both.
+	r := sample("prefers Hindi")
+	r.Vector = []float64{1, 0}
+	r.EmbeddingModel = "m3"
+	if _, err := e.Put(r, 0); err != nil {
+		t.Fatal(err)
+	}
+	err = e.CheckVectorDims(Query{User: "u", Workspace: "w", Vector: []float64{1, 0, 0, 0, 0}})
+	if err == nil || err.Error() != "query vector has 5 dimensions but the stored vectors have 2 or 4" {
+		t.Fatalf("got %v", err)
+	}
+	// Vectors in another user's records are not part of this caller's expectations.
+	if err := e.CheckVectorDims(Query{User: "someone-else", Workspace: "w", Vector: []float64{1, 0, 0}}); err != nil {
+		t.Fatalf("a caller who cannot read the vectors was rejected: %v", err)
+	}
+}
+
+// The guard has to hold at the API boundary too, where it was reported as a silent 200.
+func TestHTTPSearchRejectsWrongVectorDimension(t *testing.T) {
+	e, _ := openTest(t)
+	s := &Server{engine: e, token: "test-token-0123456789", user: "local-user", workspace: "default", role: "admin"}
+	call := func(path string, body any) *httptest.ResponseRecorder {
+		var b bytes.Buffer
+		json.NewEncoder(&b).Encode(body)
+		r := httptest.NewRequest("POST", path, &b)
+		r.Header.Set("Authorization", "Bearer "+s.token)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("/api/v1/search/", map[string]any{"vector": []float64{1, 2, 3}}); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	store := map[string]any{"kind": "fact", "content": "prefers dark mode", "embedding_model": "m1", "vector": []float64{1, 0, 0, 0}}
+	if w := call("/api/v1/memories/", store); w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w := call("/api/v1/search/", map[string]any{"vector": []float64{1, 2, 3}, "embedding_model": "m1"})
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "stored vectors have 4") {
+		t.Fatalf("wrong dimension accepted: %d %s", w.Code, w.Body.String())
+	}
+	if w := call("/api/v1/search/", map[string]any{"vector": []float64{1, 0, 0, 0}, "embedding_model": "m1"}); w.Code != 200 {
+		t.Fatal("matching dimension rejected", w.Code, w.Body.String())
+	}
+	if w := call("/api/v1/search/", map[string]any{"vector": []float64{1, 2, 3}, "embedding_model": "m2"}); w.Code != 200 {
+		t.Fatal("unknown model rejected", w.Code, w.Body.String())
+	}
+	if w := call("/api/v1/search/", map[string]any{"text": "dark"}); w.Code != 200 {
+		t.Fatal("text search rejected", w.Code, w.Body.String())
 	}
 }
 

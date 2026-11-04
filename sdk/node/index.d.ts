@@ -37,7 +37,7 @@ export declare class MemoryDB {
   transaction(changes: { record: object; expected: number }[], idempotencyKey?: string): Promise<{ results: Record[] }>;
   memories: {
     create(record: object): Promise<Record>;
-    list(opts?: { kind?: string; source?: string; q?: string; limit?: number }): Promise<{ results: Record[] }>;
+    list(opts?: { kind?: string; source?: string; q?: string; limit?: number }): Promise<{ results: { record: Record; score: number }[] }>;
     get(pk: string): Promise<Record>;
     history(pk: string): Promise<{ results: Record[] }>;
     delete(pk: string, version: number): Promise<Record>;
