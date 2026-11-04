@@ -153,6 +153,39 @@ the three `pyproject.toml` files, `sdk/node/package.json`, and the `v0.2.2` refe
 | Local gates before tagging | PASS — `gofmt -l` clean, `go vet ./...` clean, `go test -race ./...` ok, `go build` + `-version` printed `0.2.3`, `python3 -m build` produced `superb_memory-0.2.3-py3-none-any.whl` with `Version: 0.2.3` in its metadata, `python3 manage.py check` clean, `python3 tests/smoke.py` PASS |
 | Behaviour worth knowing, not a bug | `mdb sync` against a collection that does not exist returns `mdb error [400]: collection customers does not exist; create it first` and exits 1. QUICKSTART §6 only works because §3's `mdb demo` created `customers`, so the section is correct **in document order** and a reader who jumps straight to §6 gets a clean, actionable error rather than a silent create |
 
+## v0.2.4 (4 November 2026) — an outside tester found a real `avg` bug
+
+A reviewer who cloned the project and tested `v0.2.3` independently reported that `avg` cuts
+repeating decimals: `avg(1,1,2)` answered `1` instead of `1.3333333333333333`, and `41597/770`
+answered `54.0`. The report was right, so `404c363` carries the fix and `b5bb43f` is tagged
+`v0.2.4`. Reproduced against a binary built from `main` **before** editing anything, and the root
+cause was exactly as filed: `rationalJSON` used `rem.Sign() == 1` to decide that a denominator was
+made of 2s and 5s alone, but `Sign` only says *positive* - the leftovers after dividing out the 2s
+and 5s (3, 7, 11) are positive too, so every repeating quotient took the exact-print branch and was
+rounded by `FloatString(places)`, where `places` counts only the 2s and 5s and is usually 0 or 1.
+The test has to be `rem == 1`. **`docs/API.md:122` already promised 17 significant digits, so the
+documentation was correct and the code was not** - the opposite of the 0.2.2 case, where the wheels
+matched their docs and the docs had run ahead of the code.
+
+| Check | Result |
+|---|---|
+| Live repro before the fix | `avg(1,1,2)` → `"values":{"avg_v":1}` from a `main` build on `POST query/t/` |
+| Blast radius | `avg` is the only caller that divides (`documents.go:783`). `sum` reports the accumulator as-is, and `engine.go:423` (`inc`) adds finite decimals whose sum is always finite, so no other output moves; no README or doc quotes an `avg` result, so nothing needed re-wording |
+| Fix verification, independently sourced | `aggregate_test.go` pins both halves: five finite cases keep printing in full (`0.5`, `0.125`, `0.35`, `2251799813685263.25`, `2`) and seven repeating cases are checked against **17 significant digits computed separately** with Python's `decimal` at `prec=17`. Expected values were re-derived here before trusting the tester's table, and matched |
+| The test actually guards something | The one-line condition was flipped back and the suite re-run: it fails on exactly the seven cases the tester listed (`0`, `-0`, `1`, `0`, `0.2`, `54.0`, `49.65`) plus the end-to-end `avg(1,1,2)`. Then flipped forward again and everything passed |
+| Local gates | `gofmt -l` clean, `go vet ./...` clean, `go test -race -count=1 ./...` ok with coverage **73.6%** (was 73.4%), `python3 tests/smoke.py` PASS, `./memorydb -version` prints `0.2.4` |
+| Release workflow | PASS — run 41804878483, all jobs green (`server`, `python-clients`, `publish`, `container`, `pypi`; `npm` skipped). Second consecutive **fresh tag** to publish to PyPI unaided, so the single shared publisher row is holding |
+| PyPI indexes | PASS — all three names serve **0.2.4** (wheel + sdist). The CDN trap repeated exactly: `/pypi/<name>/0.2.4/json` answered 200 at once while `/pypi/<name>/json` still reported `0.2.3` in `info.version` |
+| Byte-identity + sidecar | PASS — 11 release assets, `sha256sum -c sha256sums.txt` → 10/10 `OK`, and all six PyPI files carry the same sha256 as the release assets |
+| `bash install.sh` at the tag | PASS — downloaded and checksum-verified the linux-amd64 archive; the installed `~/.local/bin/memorydb` reports `0.2.4`. Note the install dir is `$HOME/.local/bin`, not `.` - `./memorydb` after install.sh is a stale instinct |
+| `go install github.com/humaniods/MemoryDB@v0.2.4` | PASS, with two things worth knowing: the binary it drops in `$GOPATH/bin` is named **`MemoryDB`** (module path, capitalised), not the `memorydb` the very next README block runs; and it compiled here on **Go 1.18.1** even though the README states 1.24+ is needed |
+| ghcr | PASS — `:0.2.4` and `:latest` both report `0.2.4` on an anonymous re-pull. `docker run --rm <image> -version` fails ("Run 'docker run --help'") because the image defines only `CMD`, so the argument replaces the command - use `--entrypoint memorydb` |
+| End-to-end from PyPI, the point of the release | PASS — clean venv, `pip install superb-memory==0.2.4`, `mdb serve` fetched `memorydb-0.2.4-linux-amd64.tar.gz` and sha256-checked it, `mdb health` reported `version 0.2.4`, and `avg(1,1,2)` returned raw JSON `"avg_v":1.3333333333333333`. The **released** binary is fixed, not just `main` |
+| Other released surfaces | PASS — `memorydb-django==0.2.4` and `memorydb-langchain==0.2.4` import, MCP `initialize` → `{'name': 'memorydb', 'version': '0.2.4'}` with the 10 tools |
+| Verification trap found on the way | Printing the response through Python's `json.load` turned `0.28571428571428571` into `0.2857142857142857` and `0.16666666666666667` into `0.16666666666666666`. That is float64's shortest repr in the *display*, not a server bug - compare raw bytes for anything digit-count related. Integers are safe: `json.loads` keeps `9007199254741053` an `int` |
+| Tester's other findings, checked here | `{"fn":"count"}` → `400 unsupported aggregate count` (`aggFns`, `documents.go:646`); `docs/CONNECTING.md:81` really does show `import { MemoryDB } from 'memorydb'` while `sdk/node/package.json` names the package `superb-memory`, which npm has never published; a 3-dim query vector against 4-dim stored vectors really does return `{"results":[]}` with HTTP 200 |
+| One tester claim that does not hold | `GET memories/?q=` and the same call without `q` were reported as two different response shapes. Measured on a live server: **both** return `{"results":[{"record":…,"score":…}]}` - without a query `score` is just `0`. The defect is in the *typing*, not the API: `sdk/node/index.d.ts:40` declares `list(): Promise<{ results: Record[] }>`, so TypeScript readers are told to expect bare records (`history` at `:42` genuinely does return records, so the file is not wrong everywhere) |
+
 ## Verified failure and consistency cases
 
 Atomic batch rollback, duplicate unique values under concurrent writes, exact
