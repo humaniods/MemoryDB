@@ -702,7 +702,7 @@ func rationalJSON(v *big.Rat) json.Number {
 		rem.Div(rem, five)
 		fives++
 	}
-	if rem.Sign() == 1 {
+	if rem.Cmp(big.NewInt(1)) == 0 {
 		places := twos
 		if fives > places {
 			places = fives
