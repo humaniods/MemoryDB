@@ -130,6 +130,29 @@ written while `main` was still that commit; `main` has since moved on, see the 4
 | ghcr re-check | PASS — `ghcr.io/humaniods/memorydb:0.2.2` and `:latest` both report `0.2.2` on an anonymous pull |
 | **Gap found: 0.2.2's wheels predate the doc fixes** | `v0.2.2` is `46ebe51`, but the example files and the CLI fixes landed in `84fa3a4`, which is **only on `main`**. So the published 0.2.2 wheel still (a) has no `examples/call.json` / `examples/customers.json` in the repository at that tag, (b) `mdb ingest --file <wrong path>` raises a raw `FileNotFoundError` traceback instead of `mdb: cannot read …`, and (c) `mdb ingest` **drops the `context` field** the payload documents, so facts land with an empty context. The happy-path commands above pass because they read the files from a `main` checkout. The published README on GitHub is `main`, so readers are being pointed at behaviour the released wheel does not have - this needs a 0.2.3 patch release rather than a doc rollback |
 
+## v0.2.3 (4 November 2026) — the release whose wheels match their own documentation
+
+`efb027e` is tagged `v0.2.3`. It moves ten version strings together - `main.go`, the
+`install.sh` default, `sdk/cli.py`'s `SERVER_VERSION`, `sdk/memorydb_mcp.py`'s `SERVER_INFO`,
+the three `pyproject.toml` files, `sdk/node/package.json`, and the `v0.2.2` references in
+`docs/QUICKSTART.md` and `docs/FEATURES.md` - so that the artifacts on PyPI carry `84fa3a4`.
+
+| Check | Result |
+|---|---|
+| Release workflow | PASS — run 41782917182, every job green: `server`, `python-clients`, `publish`, `container`, **`pypi`** (`npm` skipped). This is the first **fresh tag** to publish to PyPI successfully, not a rerun of an old one, so the shared-publisher fix is proven for future releases |
+| PyPI indexes | PASS — `superb-memory`, `memorydb-django` and `memorydb-langchain` all serve **0.2.3** (wheel + sdist). Note for the next reader: `/pypi/<name>/0.2.3/json` answers 200 immediately after upload while `/pypi/<name>/json` keeps reporting the previous version for several minutes because that document is CDN-cached - check the version-specific URL first, then `pip install <name>==0.2.3` in a clean venv, which is the authoritative test |
+| Byte-identity with the release | PASS — all six 0.2.3 PyPI files carry the same sha256 as the GitHub Release assets; `v0.2.3` has 11 assets and `sha256sums.txt`'s 10 entries all match |
+| `bash install.sh` at the tag | PASS — fetched and checksum-verified the linux-amd64 archive into a throwaway `MEMORYDB_INSTALL_DIR`; the installed binary reported `0.2.3` |
+| `go install …@latest` | PASS — the module proxy resolved **v0.2.3** (the compile still needs the Go 1.24+ the README states; this box has 1.18) |
+| ghcr | PASS — `:0.2.3` reports `0.2.3`, and `:latest` reports `0.2.3` **after an explicit `docker pull`**. A plain `docker run` on a `latest` this machine had already pulled printed `0.2.2`: the daemon serves the cached manifest, so re-pull before trusting a `latest` check |
+| The three gaps 0.2.2 shipped with, re-tested from PyPI | PASS — `git ls-tree v0.2.3` carries `examples/call.json` and `examples/customers.json`; `mdb ingest --file does-not-exist.json` now prints `mdb: cannot read does-not-exist.json: No such file or directory` and exits 1 with no traceback; and `mdb ingest --file examples/call.json` writes all three facts with `metadata.context = 'account'`, which 0.2.2 silently dropped |
+| QUICKSTART in document order, fresh journal | PASS — `demo` (6 documents, 4 memories, 26 mirrored rows), then §6 exactly as printed: first sync `created 3, updated 0, unchanged 0, written 3`, second sync `created 0, updated 0, unchanged 3` and **no `written` key**, `--delete-missing` `removed 0` because the demo rows belong to `acme-sample` and `stripe` may only tombstone its own keys, `sources` → `acme-sample` 26 rows / `stripe` 3 rows, `query customers --where region=Rajasthan --fields id,name` → `equality index: region` |
+| Django cache + sessions, 0.2.3 wheels | PASS — `MemoryDBCache` round-trip, `add` returns False on a collision, `memorydb_django.sessions` saved and reloaded a session through a fresh `SessionStore` |
+| LangChain, 0.2.3 wheel | PASS — the README snippet verbatim, human + ai read back in order |
+| MCP, 0.2.3 wheel | PASS — `initialize` → `{'name': 'memorydb', 'version': '0.2.3'}`, `tools/list` → the 10 tools |
+| Local gates before tagging | PASS — `gofmt -l` clean, `go vet ./...` clean, `go test -race ./...` ok, `go build` + `-version` printed `0.2.3`, `python3 -m build` produced `superb_memory-0.2.3-py3-none-any.whl` with `Version: 0.2.3` in its metadata, `python3 manage.py check` clean, `python3 tests/smoke.py` PASS |
+| Behaviour worth knowing, not a bug | `mdb sync` against a collection that does not exist returns `mdb error [400]: collection customers does not exist; create it first` and exits 1. QUICKSTART §6 only works because §3's `mdb demo` created `customers`, so the section is correct **in document order** and a reader who jumps straight to §6 gets a clean, actionable error rather than a silent create |
+
 ## Verified failure and consistency cases
 
 Atomic batch rollback, duplicate unique values under concurrent writes, exact
