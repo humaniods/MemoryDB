@@ -22,7 +22,7 @@ history.add_message(AIMessage("Jaipur."))
 
 print("messages:", [(m.type, m.content) for m in history.messages])
 
-record = history._find()
-print("revision trail (free audit log):", [r["version"] for r in db.objects.history(pk=record["id"])])
+print("record:", history.record_id)
+print("revision trail (free audit log):", [r["version"] for r in db.objects.history(pk=history.record_id)])
 
 history.clear()

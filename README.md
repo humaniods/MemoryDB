@@ -178,7 +178,7 @@ memorydbs://TOKEN@host:443               # TLS
 | Python | `pip install superb-memory` → `from memorydb import MemoryDB` | reads `MEMORYDB_URL`; also `MemoryDB.from_url(...)` |
 | CLI | same wheel → `mdb health / doc / query / search / memory / ingest / tx / sync / sources / demo` | scripts, cron, CI |
 | MCP server | same wheel → `memorydb-mcp` (stdio) | Claude Desktop, Qoder, IDE agents; 10 tools including `memorydb_sync`; see `examples/mcp_config.json` |
-| Node / TypeScript | `sdk/node` (`import MemoryDB from './sdk/node/index.mjs'`) | dependency-free, Node 18+, ships `index.d.ts`; the `superb-memory` name on npm is not published yet - see [Verify and develop](#verify-and-develop) |
+| Node / TypeScript | `npm install superb-memory` · [`superb-memory`](https://www.npmjs.com/package/superb-memory) | dependency-free, Node 18+, ships `index.d.ts`; `import { MemoryDB } from 'superb-memory'` - published from `sdk/node` by the same release workflow, with npm provenance and no stored token |
 | Go | `sdk/goclient` → `goclient.Connect("memorydb://…")` | stdlib only |
 | LangChain | `pip install memorydb-langchain` → `MemoryDBChatMessageHistory` | needs `langchain-core`; each append is an immutable revision |
 | Django | `pip install memorydb-django` → `memorydb_django.MemoryDBCache`, `memorydb_django.sessions` | two lines in `settings.py` replace the cache and session stores; TTLs use the engine's own record expiry |
@@ -321,9 +321,10 @@ Everything published is verified from a clean virtualenv with no checkout on the
 `pip install superb-memory` → `mdb serve` → write and read a record, and the same for the Django
 and LangChain add-ons against real Django and `langchain-core`. The release assets, the ghcr image
 on both architectures and the checksum refusals are covered in
-[TEST_REPORT](docs/TEST_REPORT.md); that pass also found the gaps still open: the npm name
-`superb-memory` needs an `NPM_TOKEN` secret plus `PUBLISH_NPM=true` (npm has no trusted-publishing
-equivalent, so that one does store a credential), and vector search is exact scan, not ANN.
+[TEST_REPORT](docs/TEST_REPORT.md); the gap it found that still matters is that vector search is an
+exact scan, not ANN - everything else it listed is now closed, including the npm name
+`superb-memory`, which CI publishes through npm Trusted Publishing with no stored token (that took
+one human `npm publish` first, because a publisher can only be registered on a package that exists).
 
 ## Storage and consistency contract
 

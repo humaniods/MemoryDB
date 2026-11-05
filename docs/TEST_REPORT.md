@@ -49,9 +49,9 @@ database can be obtained without cloning this tree. What was actually executed h
 | the third `pypi` upload step | PASS — run 41194303445 with all three names in `PYPI_PROJECTS`: the two already-published uploads skipped, `memorydb_langchain-0.2.1` wheel + sdist uploaded, and `https://pypi.org/pypi/memorydb-langchain/json` then reported `0.2.1` |
 | the `pypi` job's per-distribution gating | PASS — run 41188687918 with `PYPI_PROJECTS=superb-memory,memorydb-django` re-ran the first upload as a skip (`skip-existing`) rather than a failure, uploaded the Django wheel + sdist, and left the third step skipped |
 
-Not executed here: `npm publish`, which needs a stored `NPM_TOKEN` secret because npm has no
-trusted-publishing equivalent, and that secret has not been created. Everything else above ran
-against the published v0.2.1 release, the GitHub Actions runs for it, PyPI and ghcr.io.
+Not executed here: `npm publish` - the `superb-memory` name has never been published, so there is
+nothing to verify on npm (see the 5 November note for what publishing it takes). Everything else
+above ran against the published v0.2.1 release, the GitHub Actions runs for it, PyPI and ghcr.io.
 
 ## Connector mirroring and the sample seed (3 November 2026)
 
@@ -257,6 +257,27 @@ nothing and still be version 0.2.5, so this needs its own number.
 
 **Release state of 0.2.5: shipped and verified on all four channels.** The LangChain fix above is
 waiting on the maintainer's choice of version.
+
+## npm without a stored token (5 November 2026)
+
+`release.yml`'s `npm` job asked for an `NPM_TOKEN` secret, and this file used to assert that npm
+has no trusted-publishing equivalent. That assertion is wrong, and it was worth chasing because a
+registry credential in a repository is the thing PyPI's setup was rewritten to avoid.
+
+| Fact, from npm's own docs | Consequence here |
+|---|---|
+| Trusted publishing is configured **on the package's Settings page**, so the package has to exist first | CI cannot make the first publish. `npm login && npm publish` in `sdk/node` is a human action, exactly once |
+| The registration **expires if its first successful publish does not land within 2 days** | `PUBLISH_NPM=true` has to be set immediately after registering, and the next tag has to carry a real npm version - which is another reason the LangChain fix wants its own number rather than a rebuilt `0.2.5` |
+| Workflow needs `permissions: id-token: write`, npm CLI ≥ 11.5.1 and Node ≥ 22.14.0 | the job now requests the token and pins `node-version: '24'`; the old `NODE_AUTH_TOKEN` env is gone |
+| `--provenance` is automatic for a public package from a public repo once a publisher is registered, and provenance **422s if `package.json` has no `repository.url`** | `sdk/node/package.json` now declares `repository` with `directory: sdk/node`, and the job passes `--provenance` explicitly |
+| `actions/setup-node` with `registry-url:` writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, substituting a dummy placeholder when no token is set | `registry-url:` is deliberately omitted; with it, npm sends the placeholder instead of the OIDC grant and the failure looks like an anonymous `404` on a package that exists |
+| A publisher mismatch surfaces as `E404`/`ENEEDAUTH`, not as a clear "not allowed" error | the registration fields have to match exactly: Owner `humaniods` (no `@`, case-sensitive), Repository `MemoryDB`, Workflow `release.yml`, Environment `npm` because the job declares one |
+| Registrations created after 3 September 2026 default to `npm stage publish` only | `npm publish` must be ticked under **Allowed actions**, or every run fails on a correctly configured publisher |
+| `npm trust` requires account 2FA and rejects bypass-2FA tokens | the registration is interactive on the website; it is not something this repository can script |
+
+Nothing here is verified by execution yet - it is read off npm's documentation, and the only real
+proof is a run that publishes. `https://registry.npmjs.org/superb-memory` still answers `404`, the
+name is free, and the repository holds zero secrets, which is the state this plan starts from.
 
 ## Verified failure and consistency cases
 

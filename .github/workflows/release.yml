@@ -139,8 +139,13 @@ jobs:
   #          pending publisher into a normal one. Only one pending publisher per
   #          (repo, workflow, environment) can exist, so the other two names are added
   #          one round later each. Then set PUBLISH_PYPI=true.
-  #   npm  - add the NPM_TOKEN secret and the repository variable PUBLISH_NPM=true
-  #          (the npm package is sdk/node, published as superb-memory).
+  #   npm  - publish the package once by hand (npm login && npm publish in sdk/node), then
+  #          register a Trusted Publisher on its Settings page for Owner humaniods,
+  #          Repository MemoryDB, Workflow release.yml, Environment npm, with `npm publish`
+  #          ticked under Allowed actions - npm defaults new registrations to
+  #          `npm stage publish` only. No secret is involved, and the registration expires
+  #          unless its first OIDC publish happens within 2 days, so set PUBLISH_NPM=true
+  #          straight after. The package is sdk/node, published as superb-memory.
   pypi:
     if: vars.PUBLISH_PYPI == 'true'
     needs: [python-clients]
@@ -188,13 +193,19 @@ jobs:
     environment: npm
     permissions:
       contents: read
+      # npm Trusted Publishing: the runner mints a short-lived OIDC token and npm trades it for
+      # the publish, so no registry credential lives in the repository. The publisher has to be
+      # registered on the package first, and npm only lets you do that once the package exists -
+      # which is why the very first `npm publish` is a human action, not a CI one.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm publish
+          # 22.14+/24 ships an npm new enough for trusted publishing. Deliberately no
+          # registry-url: setup-node then writes //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+          # with a dummy placeholder when no token exists, and npm sends that instead of the OIDC
+          # grant - the failure looks like an anonymous 404 on a package that is right there.
+          node-version: '24'
+      - run: npm publish --provenance --access public
         working-directory: sdk/node
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

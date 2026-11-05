@@ -4,6 +4,25 @@ Behaviour changes go here because the GitHub Release notes are the fixed block t
 `.github/workflows/release.yml` writes for every tag, so they cannot say what changed.
 Evidence for each line lives in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
+## 0.2.6 — 5 November 2026
+
+- **npm:** `superb-memory` is now a real npm package. `npm install superb-memory` then
+  `import { MemoryDB } from 'superb-memory'` works - verified against the registry before this
+  release was cut. The first version (0.2.5) was published by hand, because npm lets you register
+  a trusted publisher only on a package that already exists; from 0.2.6 the release workflow
+  publishes it itself over OIDC with provenance, and the repository stores no npm credential.
+- Fixed: `sdk/langchain/README.md` told readers to call `history.record_id`, an attribute the
+  class never had, so the copied example died on `AttributeError`. It is a real property now,
+  `None` before the first message and after `clear()`.
+- Fixed: `chat_history.py`'s own docstring pointed at `db.messages.get(pk).history()`. There is no
+  `db.messages` manager - the client exposes `objects`, `collections` and `sources` - and `get()`
+  returns a record, which has no `.history()`. It points at `db.objects.history(pk=…)` now, which
+  is what the README's own example had always used correctly.
+- Changed: `docs/CONNECTING.md` and `README.md` stop telling Node readers to copy a file out of a
+  clone and use the package name instead.
+- No server change at all: no HTTP status, no response shape and no query semantic moves in this
+  release. Everything above is client Python, client docs, `sdk/node` packaging and the workflow.
+
 ## 0.2.5 — 4 November 2026
 
 - **Behaviour change:** `POST search/` answers `400 query vector has N dimensions but the

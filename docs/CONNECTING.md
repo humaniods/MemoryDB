@@ -78,9 +78,8 @@ MEMORYDB_URL=memorydb://my-app-token-here-1234@127.0.0.1:8080
 Node (dependency-free client, Node 18+):
 
 ```js
-// The client is one dependency-free file; import it from a clone or copy it into your app.
-// It is not on npm yet, so there is no package name to install against.
-import { MemoryDB } from './sdk/node/index.mjs';
+// npm install superb-memory   (dependency-free, Node 18+, ships its own types)
+import { MemoryDB } from 'superb-memory';
 const db = new MemoryDB(process.env.MEMORYDB_URL);
 
 await db.memories.create({ kind: 'fact', content: 'user prefers dark mode', source: 'web-app' });

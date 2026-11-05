@@ -1,7 +1,7 @@
 """LangChain integration for MemoryDB: chat message history backed by the memory engine.
 
 Each session lives in one `chat` record; LangChain-style appends become new immutable
-revisions in the WAL, so `db.messages.get(pk).history()` is a free audit trail.
+revisions in the WAL, so `db.objects.history(pk=history.record_id)` is a free audit trail.
 
 Install: pip install ./sdk && pip install langchain-core
 """
@@ -30,6 +30,12 @@ class MemoryDBChatMessageHistory(BaseChatMessageHistory):
             if hit["record"].get("metadata", {}).get("session_id") == self.session_id:
                 return hit["record"]
         return None
+
+    @property
+    def record_id(self):
+        """The id of the record holding this session, or None before the first message."""
+        record = self._find()
+        return record["id"] if record else None
 
     @property
     def messages(self):

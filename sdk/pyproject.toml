@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "superb-memory"
-version = "0.2.5"
+version = "0.2.6"
 description = "Python client, mdb CLI and MCP server for the MemoryDB Go document and agent memory database"
 readme = "README.md"
 requires-python = ">=3.10"
