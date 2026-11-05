@@ -210,6 +210,54 @@ guard fires only when a vector is sent.
 | Live behaviour sweep | 26 checks on a fresh journal: empty scope accepts a vector query, correct length still scores with the unchanged `{record, score}` shape, unknown model and text-only searches untouched, `kind:document` gets its own length expectations, and the seven operator cases above. 24 passed first time; the 2 failures were my harness using a `"null": true` schema option that `Field` (`documents.go:20`) does not have - re-run correctly, the server behaved as documented |
 | Release state | Decided with the maintainer on 4 November 2026: this ships as **0.2.5**, a patch, with the 200→400 change called out in the new `CHANGELOG.md` rather than buried. The release notes on GitHub are static text produced by `release.yml`, which is why the changelog file exists - it is the only place a reader can see what a version changed. Verification of the published artifacts follows in the next section |
 
+## v0.2.5 (4 November 2026) — what the published artifacts were checked against
+
+`7a6ca74` is tagged `v0.2.5` (tag object `d2a1130`). Release run 41846090783: `server`,
+`python-clients`, `publish`, `container` and `pypi` all green, `npm` skipped as designed - the
+third consecutive fresh tag to publish to PyPI unaided. Everything below was measured on
+**downloaded artifacts**, never on this working tree.
+
+| Check | Result |
+|---|---|
+| Release assets | PASS — 11 assets, and `sha256sum -c sha256sums.txt` over every file the sidecar names → 10/10 `OK`. Wheels are byte-identical across the two channels that serve them: `superb_memory` `0f9bf551…`, `memorydb_django` `9dfe3a04…`, `memorydb_langchain` `be8112cb…` match PyPI's own recorded sha256, so the release and the index are the same bytes |
+| PyPI | PASS — all three names serve **0.2.5** (wheel + sdist). Read through `/pypi/<name>/0.2.5/json`, not the project-level document, which the CDN still serves stale |
+| `bash install.sh` at the tag | PASS — `https://raw.githubusercontent.com/…/v0.2.5/install.sh` is byte-identical to `git show v0.2.5:install.sh` (`951ff3d5…`), and running that verified copy into `MEMORYDB_INSTALL_DIR` fetched `memorydb-0.2.5-linux-amd64.tar.gz`, checked it, and installed a binary reporting `0.2.5`. The pipe form is refused in this environment, so the bytes were compared instead of piped - the same file either way |
+| `go install …@v0.2.5` | PASS — compiles and prints `0.2.5`; the binary is still named **`MemoryDB`**, not the `memorydb` the README runs next |
+| ghcr | PASS — `:0.2.5` and `:latest` resolve to the same image id (`8250b5d6…`) on an anonymous re-pull, the container's own `health/` says `0.2.5`, and **the new guard works inside the image**: a 5-dim row then a 2-dim query gives `400 query vector has 2 dimensions but the stored vectors have 5` |
+| The behaviour change, on the released binary | PASS — empty scope still `200 {"results":[]}`; one 4-dim fact then a 3-dim query → `400 query vector has 3 dimensions but the stored vectors have 4`, exactly the string in `docs/API.md`; a 4-dim query → `200` with `["record","score"]` and score `0.01639344262295082`. So the 400 is in the artifact people install, not just on `main` |
+| `avg` still fixed | PASS — on the same released binary: `avg(1,2,3)` → `2` as an integer, `avg(1,2)` → `1.5`, and a 3-row group summing to 2 → raw `"avg_amount":0.66666666666666667`. No regression from the 0.2.4 fix |
+| The two documented semantics, on the released binary | PASS — `ne region=Rajasthan` matches only the one row that *has* `region` (total 1) while `exists:false` finds the three that lack it (total 3), and `{"fn":"count"}` → `400 unsupported aggregate count` |
+| MCP surface, the agent-facing one | PASS — `initialize` → `serverInfo {'name': 'memorydb', 'version': '0.2.5'}` from the PyPI wheel, `memorydb_search` with a wrong-size vector returns `isError: true` with the same 400 text instead of an empty list, and health/text/list are unaffected |
+| Every README *Everyday commands* line, in doc order | PASS 10/10 — `health`, `demo`, `collections ls`, `query --where region=Rajasthan --fields …`, `search "renewal" --limit 5`, `memory add`, `memory history --id <real id>`, `ingest --file examples/call.json`, `sync stripe … --file examples/customers.json`, `sources`, driven by the **0.2.5 wheel** against a server the same wheel started via `mdb serve` (which fetched `memorydb-0.2.5-linux-amd64.tar.gz`, checksummed it and reported `MemoryDB 0.2.5 listening`). Console `/` and `/studio/` both serve HTML from the released binary |
+| Other released surfaces | PASS — `memorydb-django==0.2.5` cache `set`/`get`/`add`/`incr`/`delete` against the released server, `memorydb-langchain==0.2.5` history round-trip, and the Node block from `docs/CONNECTING.md` run verbatim: it prints `record id + score`, and `Object.keys(list().results[0])` is `record,score`, which is what `index.d.ts` now declares |
+
+| Own harness errors, recorded because they looked like defects | Four, all mine, none of them the release's: (1) `MEMORYDB_URL=http://127.0.0.1:18099/api/v1` made **every** MCP tool return `route or method not found` - `memorydb.py:94` appends `/api/v1/` itself, so the value must be origin-only or a `memorydb://` string; (2) `POST memories/` needs a `kind` from `valid()` (`engine.go:242`) and `search/` accepts no `user` field, so my first payloads got 400s for the right reasons; (3) a 300 s `timeout` killed `mdb serve` mid-run, which produced six instant `Connection refused` in the sweep; (4) I called `MemoryDBChatMessageHistory(user=…)` - the constructor takes `session_id`. Also `curl -sSfL` on 11 assets hit a HTTP/2 stream error, so the assets were fetched individually |
+| Observed, not a defect | `GET /studio` (no trailing slash) is `401 {"error":"valid bearer token required"}` because `main.go:111` serves exactly `/` and `/studio/`. Every URL the project prints or documents - README:80, QUICKSTART:39, `mdb serve`'s own banner at `cli.py:251` - uses the trailing slash, so nothing documented breaks; `install.sh:129` mentions only the console. A human typing the bare path sees JSON |
+
+## Found while verifying 0.2.5, and not yet released
+
+`pip show`-level verification of the LangChain integration turned up two references to APIs that
+have never existed, in the wheel people actually install:
+
+| Claim | Reality on 0.2.5 |
+|---|---|
+| `sdk/langchain/README.md:29` - `db.objects.history(pk=history.record_id)` | `MemoryDBChatMessageHistory` has no `record_id`; the copied example dies on `AttributeError`. The id is reachable only through the private `_find()`, which is exactly what `examples/langchain_demo.py` was doing |
+| `sdk/langchain/memorydb_langchain/chat_history.py:4` - `db.messages.get(pk).history()` | there is no `db.messages` manager at all (`memorydb.py:97` gives `objects`, `collections`, `sources`), and `get()` returns a record dict that has no `.history()` |
+
+Fixed locally, not committed: `record_id` is now a real property (`chat_history.py`, returns
+`None` before the first message and after `clear()`), the docstring points at the manager that
+exists, and the example uses the public property instead of reaching into `_find()`. Verified
+against the **released 0.2.5 server** with the repo's SDK: `record: 46a00b5b…`, revision trail
+`[1, 2]` oldest-first, README block runs verbatim, and after `clear()` → `None` and `[]`. Client
+Python only, so the Go server, the binaries, the container and the other two wheels are unaffected
+and none of it changes anything a working 0.2.5 install already does. Gates: `gofmt`/`go vet`/
+`go test -race` unchanged at 74.1%, `python3 tests/smoke.py` PASS, `python -m build sdk/langchain`
+produces `memorydb_langchain-0.2.5` fine - which is the trap: that wheel would publish over
+nothing and still be version 0.2.5, so this needs its own number.
+
+**Release state of 0.2.5: shipped and verified on all four channels.** The LangChain fix above is
+waiting on the maintainer's choice of version.
+
 ## Verified failure and consistency cases
 
 Atomic batch rollback, duplicate unique values under concurrent writes, exact
