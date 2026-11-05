@@ -255,8 +255,9 @@ and none of it changes anything a working 0.2.5 install already does. Gates: `go
 produces `memorydb_langchain-0.2.5` fine - which is the trap: that wheel would publish over
 nothing and still be version 0.2.5, so this needs its own number.
 
-**Release state of 0.2.5: shipped and verified on all four channels.** The LangChain fix above is
-waiting on the maintainer's choice of version.
+**Released.** `v0.2.6` carries it, and the check above was re-run from the PyPI wheel in a clean
+virtualenv rather than from the checkout - `record_id` `None` → id → `None` after `clear()`,
+revision trail `[1, 2]`, `db.objects.search("Jaipur")` one hit.
 
 ## npm without a stored token (5 November 2026)
 
@@ -275,9 +276,77 @@ registry credential in a repository is the thing PyPI's setup was rewritten to a
 | Registrations created after 3 September 2026 default to `npm stage publish` only | `npm publish` must be ticked under **Allowed actions**, or every run fails on a correctly configured publisher |
 | `npm trust` requires account 2FA and rejects bypass-2FA tokens | the registration is interactive on the website; it is not something this repository can script |
 
-Nothing here is verified by execution yet - it is read off npm's documentation, and the only real
-proof is a run that publishes. `https://registry.npmjs.org/superb-memory` still answers `404`, the
-name is free, and the repository holds zero secrets, which is the state this plan starts from.
+Every row of that table is now verified by execution, on the `v0.2.6` tag - see below. The one line
+that still reads as documentation rather than fact is the failure shape of a publisher mismatch:
+the run that published was a matching one, so no `E404` was ever produced here.
+
+## v0.2.6 (5 November 2026) — the release whose npm package CI published itself
+
+`main` = `b1c58c1`, tag `v0.2.6`. Nothing in the server moved: no status code, response shape or
+query semantic changed. What moved is the Node client's addressability and one Python property.
+
+| Channel | What was executed, and against what |
+|---|---|
+| `release.yml` run 41982360174 | all six jobs green: `server`, `python-clients`, `publish`, `container`, `pypi`, and **`npm` for the first time** |
+| npm job log | `npm 11.19.1`, `+ superb-memory@0.2.6`, `publish Signed provenance statement with source and build information from GitHub Actions`, transparency log `search.sigstore.dev/?logIndex=3692750570`, and no credential anywhere in the job |
+| tarball identity | the CI `npm publish` shasum `ca8bb576c340cc2793ef009e72be06e971c21a3f` equals the local `npm pack --dry-run` shasum, and equals the registry's `versions["0.2.6"].dist.shasum` |
+| GitHub Release `v0.2.6` | 11 assets; `sha256sum -c sha256sums.txt` reports `OK` for all ten files it names |
+| PyPI | `superb-memory`, `memorydb-django`, `memorydb-langchain` each at `0.2.6`, wheel + sdist, and all six sha256s equal to the GitHub Release assets - the same bytes on both indexes (they differ from locally built wheels only in build metadata, as CI builds them in a different tree) |
+| `install.sh` at the tag | `raw.githubusercontent.com/.../v0.2.6/install.sh` is byte-identical to `git show v0.2.6:install.sh` (`701956e5fbec71…`); run into a temp dir it installs a binary that answers `0.2.6` |
+| `go install …@v0.2.6` | compiles and answers `0.2.6`; the binary is still named `MemoryDB` (the module path), not `memorydb` |
+| `ghcr.io/humaniods/memorydb` | `docker pull` (anonymous) then `--entrypoint memorydb … -version` → `0.2.6` for `:0.2.6` **and** `:latest`; the manifest lists `amd64` and `arm64` |
+| npm consumer | `npm install superb-memory` in a temp dir → `node_modules/superb-memory` holds exactly `index.mjs`, `index.d.ts`, `package.json`; `npm audit signatures` reports *1 package has a verified registry signature* and *1 package has a verified attestation*; `docs/CONNECTING.md` §4's Node block runs verbatim against the published server and prints a record id and score |
+| registry metadata | `dist-tags.latest = 0.2.6`; `dist.attestations` present for `0.2.6` and absent for the hand-published `0.2.5`, which is the visible difference between a token publish and a trusted one |
+| pip-only bootstrap | `mdb serve` in a clean virtualenv fetched and sha-verified the release binary into `~/.memorydb/bin/memorydb-0.2.6` and served `GET api/v1/health/` → `"version": "0.2.6"` |
+
+Behaviour, re-checked on the *published* binary rather than on `main`, because 0.2.5 introduced a
+status code: a 3-dimension query against 4-dimension stored vectors answers
+`400 query vector has 3 dimensions but the stored vectors have 4`; a query naming an
+`embedding_model` with no stored vectors answers `200` with no hits; `avg(1,1,2)` reads
+`1.3333333333333333` off the raw response bytes; `x ne 1` returns only the row where `x` is present
+and different, `{"op":"exists","value":false}` returns the row missing `x`; `{"fn":"count"}` is still
+the documented `400 unsupported aggregate count`.
+
+`docs/QUICKSTART.md` re-run in document order on a fresh journal with the PyPI 0.2.6 clients:
+`mdb health`, `mdb demo` (4 tables, 26 mirrored rows), `mdb memory add`, `mdb search "fridays"`,
+the demo's own suggested `mdb query customers --where region="Rajasthan"` (equality index, no
+traceback), the §5 snippet including `only("email")` projecting the payload down to `email`, §6's
+two `mdb sync` runs (`created 3, written 3` then `unchanged 3` with no `written` key and
+`sequence` unmoved), `mdb sources`, the `db.sources.sync(...)` form, `examples/node_quickstart.mjs`,
+`examples/connectors_demo.py` and `sdk/node/test.mjs` (`ALL NODE SDK CHECKS PASSED`).
+From the installed wheels: `history.record_id` is `None` before the first message, the real id
+between, `None` after `clear()`, and `db.objects.history(pk=…)` gives `[1, 2]`; `memorydb-mcp`
+reports `serverInfo 0.2.6` with its 10 tools; the Django cache and session stores round-trip, create
+`django_cache`/`django_sessions` typed + unique + indexed on first use, and a `timeout=2` record
+carries an `expires` stamp after which `cache.get` misses.
+
+## Found while verifying 0.2.6, and not yet released
+
+- **`sdk/node/index.d.ts` cannot be compiled by TypeScript.** The file declares
+  `export interface Record`, which shadows the built-in generic alias of the same name, so its own
+  three uses of `Record<string, unknown>` / `Record<string, string>` resolve to that non-generic
+  interface: `tsc --strict` on a file that merely does `import { MemoryDB } from 'superb-memory'`
+  fails with three `TS2315: Type 'Record' is not generic` errors (lines 16, 24, 32 of the published
+  0.2.6 declarations). Verified in both directions: the npm-installed `0.2.6` fails, the patched file
+  compiles clean (`exit 0`), and `sdk/node/test.mjs` still passes because no runtime code moved. The
+  fix keeps every exported name and writes the three map types inline
+  (`{ [key: string]: unknown }`). It is on the working tree and unreleased, and it cannot ride 0.2.6:
+  npm refuses to publish a version that already exists, so the published `0.2.6` types stay broken
+  until a `0.2.7`. This is what the README's "ships `index.d.ts`" is promising.
+- **`sdk/django/README.md` does not say the session backend needs the URL again.**
+  `memorydb_django.sessions` builds its client from a `MEMORYDB_URL` *Django setting* or the
+  `MEMORYDB_URL` *environment variable* (`sessions.py:_client()`); it never reads
+  `CACHES["default"]["LOCATION"]`. A reader who copies the README's two settings lines verbatim, with
+  the connection string only in `LOCATION`, gets `ValueError: pass a url with token=, a memorydb://
+  connection string, or set MEMORYDB_URL` the first time Django touches a session - reproduced on the
+  published 0.2.6 wheel. The honest fix is a documentation line; making `LOCATION` the fallback is a
+  behaviour change and is the maintainer's call.
+- Not defects, recorded so they are not "fixed": `GET /studio` without the trailing slash answers
+  `404` while `/studio/` answers `200` (same observation as 0.2.5), and CI-built wheels differ
+  byte-wise from locally built ones while PyPI and GitHub Release copies match exactly.
+- Harness trap worth writing down: `pkill -f "<journal path>"` matched the command line of the very
+  shell running the `pkill`, so it killed its own wrapper before the target - stop a backgrounded
+  `mdb serve` by PID, or by `pgrep` filtered against `bash -c`, the way `pgrep -af` already needs.
 
 ## Verified failure and consistency cases
 
