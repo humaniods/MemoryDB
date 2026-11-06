@@ -105,6 +105,11 @@ func Open(path string) (*Engine, error) {
 	fail := func(err error) (*Engine, error) { f.Close(); return failLock(err) }
 	e := &Engine{file: f, lock: lock, path: path, records: map[string][]Record{}, receipts: map[string]Receipt{}}
 	var offset int64
+	// A snapshot is written as one or more frames at the head of the journal (each under
+	// maxFrame), so only the first frame resets state and every snapshot frame must follow
+	// another one. An older binary that knows only single-frame snapshots refuses the second
+	// frame with "snapshot must be first frame" instead of reading part of the data.
+	inSnapshot := false
 	for {
 		head := make([]byte, 4)
 		_, err = io.ReadFull(f, head)
@@ -154,14 +159,17 @@ func Open(path string) (*Engine, error) {
 			return fail(errors.New("unsupported storage format"))
 		}
 		if event.Snapshot {
-			if offset != 0 {
+			if offset != 0 && !inSnapshot {
 				return fail(errors.New("snapshot must be first frame"))
 			}
-			e.records = map[string][]Record{}
-			if event.Receipts != nil {
-				e.receipts = event.Receipts
+			if offset == 0 {
+				e.records = map[string][]Record{}
+			}
+			for k, v := range event.Receipts {
+				e.receipts[k] = v
 			}
 		}
+		inSnapshot = event.Snapshot
 		for _, r := range event.Records {
 			if r.ID == "" || r.Version < 1 {
 				return fail(errors.New("invalid stored identity"))
