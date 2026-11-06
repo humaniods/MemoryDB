@@ -56,11 +56,25 @@ read access within the same workspace. Collection schemas are workspace-visible.
 The default listener is loopback. Non-loopback requires `-tls-cert` and `-tls-key`,
 or explicit `-allow-insecure-network` behind a trusted HTTPS reverse proxy. Restrict
 ports to trusted clients, provision persistent storage, and manage token rotation.
-No rate limiter or per-tenant resource quota is implemented.
+`-rate-limit N` gives every principal a token bucket of N requests per second (burst
+`-rate-burst`, default 2N) and answers `429` with `Retry-After` once it is empty; it is off by
+default. There is no per-tenant storage quota.
 
 ## Backup, restore and compaction
 
-CLI maintenance acquires the same exclusive database lock. Stop the server first:
+**Online backup, no downtime.** Start the server with `-backup-dir /path/to/backups` and take a
+backup while it serves:
+
+```bash
+mdb backup        # or: curl -X POST -H "Authorization: Bearer $ADMIN" http://HOST/api/v1/admin/backup/
+# {"path": ".../memorydb-20261106T165917.222Z-seq1.bak", "bytes": 397, "sha256": "...", "sequence": 1}
+```
+
+The file name carries the time and journal sequence, so a cron job can call it repeatedly.
+Writers wait while the committed journal is copied; readers do not. Copy the `.bak` and its
+`.sha256` off the machine; restore works exactly as below.
+
+**Offline maintenance** acquires the same exclusive database lock. Stop the server first:
 
 ```bash
 ./memorydb -data memory.wal -verify
@@ -71,13 +85,28 @@ CLI maintenance acquires the same exclusive database lock. Stop the server first
 
 Keep the backup and its `.sha256` sidecar together. Backup/restore never overwrite
 an existing destination. Restore verifies the checksum and WAL replay. Test the
-restored copy before replacing a working instance. The engine's Backup method
-supports a consistent in-process copy, but no online HTTP backup endpoint exists.
+restored copy before replacing a working instance.
 
 `-compact 0` preserves all revisions; positive N retains the last N per record.
 Revision numbers stay unchanged. Tombstones and original idempotency receipts
 remain. Compaction atomically replaces the journal, fsyncs the directory, and
-retains its sidecar lock. It is not a physical-erasure operation. Never delete
+retains its sidecar lock. The snapshot it writes is a run of frames of at most 8 MiB, so
+compaction works at any size that fits in RAM (before this, it failed above 32 MiB, about
+40,000 memories with 64-dimension vectors); a binary older than that change refuses such a
+journal with `snapshot must be first frame`. Compaction is not erasure - see purge below.
+
+**Purge (physical erasure from the journal).** Delete the record first, then, as an admin of
+its workspace:
+
+```bash
+mdb purge RECORD_ID [RECORD_ID ...]      # or POST /api/v1/admin/purge/ {"ids": [...]}
+```
+
+Every revision of those records, and their copies inside idempotency receipts, are removed by
+rewriting the journal as a snapshot. A client that retries the original request with its
+`Idempotency-Key` gets `404` instead of re-creating the data. Purge does not reach backups
+taken earlier - expire those on your own schedule - and the filesystem may keep the replaced
+journal's blocks until it reuses them; use encrypted storage if that matters. Never delete
 an active `.lock` file, modify a live WAL or run writers on shared network filesystems.
 
 ## Optional extraction
@@ -108,12 +137,38 @@ Provider calls may repeat after a crash or retry, even when stored results dedup
   inspect outcome/history and retry only under a known idempotency contract.
 - Startup checksum failure: preserve the damaged WAL; restore a verified backup.
   Do not erase corrupt frames or silently truncate complete checksum failures.
-- RAM/disk growth: monitor both, take backups, compact within the documented limit.
-  There are no built-in capacity alarms or automated retention guarantees.
+- RAM/disk growth: watch `memorydb_journal_bytes`, `memorydb_revisions` and the process RSS,
+  take backups, compact. Alerting is yours to configure on top of `/metrics`.
+
+## Monitoring
+
+`GET /metrics` (admin token) serves the Prometheus text format:
+
+| metric | meaning |
+| --- | --- |
+| `memorydb_build_info{version}` | running version |
+| `memorydb_uptime_seconds` | seconds since start |
+| `memorydb_journal_sequence`, `memorydb_journal_bytes` | last committed transaction, journal size |
+| `memorydb_storage_poisoned` | 1 after an I/O failure: writes are refused until restart - alert on it |
+| `memorydb_records{kind}`, `memorydb_revisions`, `memorydb_idempotency_receipts` | live records by kind, stored revisions, receipts |
+| `memorydb_http_requests_total{route,code}` | requests by first path segment and status |
+| `memorydb_http_request_duration_seconds{route}` | latency histogram, 1 ms to 10 s buckets |
+| `memorydb_rate_limited_total` | requests refused with 429 |
+
+```yaml
+scrape_configs:
+  - job_name: memorydb
+    metrics_path: /metrics
+    authorization: { credentials_file: /etc/prometheus/memorydb-admin-token }
+    static_configs: [{ targets: ["memorydb.internal:8080"] }]
+```
+
+Good first alerts: `memorydb_storage_poisoned == 1`, a rising rate of 5xx in
+`memorydb_http_requests_total`, and search `p95` from the histogram above your budget.
 
 ## Measured throughput and latency
 
-The engine has no metrics endpoint, so these are the numbers to plan against. They were
+These are the numbers to plan against; `/metrics` shows your own. They were
 measured on 5 November 2026 against the published 0.2.6 binary (0.2.7 changes nothing in the
 server) on one x86-64 machine: AMD Ryzen 7 7735U, 16 logical CPUs, 30 GB RAM, AVX2, journal on the local
 filesystem, HTTP over loopback, one client, nothing else competing. Workload: memories with
@@ -173,8 +228,8 @@ A write is now bounded by fsync rather than by corpus size. Search is still an e
 and an ANN index is still the next step past roughly 100,000 records. The concurrency
 limits are unchanged: the engine still serializes writes behind one mutex.
 
-So: comfortable for one-node agent memory and small document sets up to a few thousand records
+So, for the 0.2.6 engine measured in the first tables: comfortable for one-node agent memory and small document sets up to a few thousand records
 with sub-second reads, and roughly 20-25 writes/s per node whatever the size. Past ~10,000
 records a search is a second-scale operation and past ~50,000 the scan is the reason to add an
 ANN index - see [the gap list in README](../README.md#storage-and-consistency-contract). None of
-this is a guarantee: there is no capacity alarm, no rate limiter, and no replication here.
+this is a guarantee, and there is no replication here.

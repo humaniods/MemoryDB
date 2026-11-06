@@ -30,6 +30,12 @@ Some record ownership failures currently return 400 rather than 403.
 | POST | `code/index/` | `{repository,branch,commit,files:{path:GoSource}}` |
 | POST | `code/revisions/` | `{repository,branch,commit,parent?,path,before,after,reason}` |
 | POST | `skills/ID/approve/` | `{version}`; admin with write permission required |
+| POST | `admin/backup/` | Admin; online checksummed backup into `-backup-dir`; `{path,bytes,sha256,sequence}` |
+| POST | `admin/purge/` | Admin; `{ids:[…]}` of already-deleted records in your workspace; erases every revision |
+| GET | `/metrics` (outside `/api/v1/`) | Admin; Prometheus text format |
+
+Every route answers `429` with `Retry-After` when the server runs with `-rate-limit` and the
+caller's principal has used up its bucket. `/metrics` is never limited.
 
 `Idempotency-Key` supports durable matching-request deduplication for creates,
 transactions and ingestion. Keys are scoped to workspace/user/path and must fit

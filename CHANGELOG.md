@@ -21,6 +21,24 @@ Evidence for each line lives in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
   at 20,000 records, text search went from 726 to 36 ms `p50` and hybrid search from 1,143 to
   84 ms. Results are identical: 300 random queries returned the same hits, order and scores from
   the old and new code. Search is still an exact scan, so it still grows linearly with the corpus.
+- Fixed: `-compact` failed with `transaction/snapshot exceeds 32 MiB` once the database outgrew
+  one journal frame - 40,000 memories with 64-dimension vectors (a 65 MB journal) were enough,
+  so a growing database could no longer be compacted. A snapshot is now a run of frames of at most
+  8 MiB at the head of the journal. A binary from before this change refuses such a journal with
+  `snapshot must be first frame` instead of reading part of it, so do not downgrade after
+  compacting.
+- New: online backups. Start the server with `-backup-dir DIR`; `POST /api/v1/admin/backup/` or
+  `mdb backup` writes `memorydb-<time>-seq<N>.bak` and its `.sha256` while the server keeps
+  serving. Before, a backup meant stopping the server.
+- New: `GET /metrics` (admin) in the Prometheus text format - journal sequence and bytes, live
+  records by kind, revisions, receipts, the poisoned flag, and per-route request counts and
+  latency histograms. `mdb metrics` prints it.
+- New: `-rate-limit N` and `-rate-burst B` give each principal a token bucket and answer `429`
+  with `Retry-After` when it is empty. Off by default; `/metrics` scrapes are never limited.
+- New: physical purge. `POST /api/v1/admin/purge/ {"ids": [...]}` or `mdb purge ID…` erases every
+  revision of records that are already deleted, and their copies inside idempotency receipts, by
+  rewriting the journal. Retrying the original request with its `Idempotency-Key` now answers
+  `404` instead of bringing the data back. Backups taken earlier are not touched.
 - New: `bench_test.go` (`go test -run '^$' -bench .`) measures write and search cost at 2,000,
   10,000 and 20,000 records, and `indexes_test.go` checks that the incremental index state always
   equals a full rebuild, plus unique swaps within one batch, expired and deleted unique holders,

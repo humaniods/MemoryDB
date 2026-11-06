@@ -342,22 +342,23 @@ Idempotency receipts are persistent and unbounded. HTTP PUT/PATCH/DELETE retries
 version/readability checks before replaying a receipt; inspect the record/history after
 uncertainty. They are not a universal exactly-once protocol.
 
-All records/history and indexes reside in RAM. Indexes rebuild on every write; this is not an
-LSM/B-tree engine. Text/vector search scans the authorized data. Request bodies are capped at
-4 MiB; transactions and compaction snapshots at 32 MiB. Compaction fails safely above its
-snapshot limit. No large-scale capacity, latency SLA, distributed replication, ANN, SQL, joins,
+All records/history and indexes reside in RAM; this is not an LSM/B-tree engine. A write
+updates only the index entries of the rows it wrote (a schema change rebuilds them all).
+Text/vector search scans the authorized data. Request bodies are capped at 4 MiB and one
+transaction at 32 MiB; a compaction snapshot is split into 8 MiB frames, so it has no size
+limit of its own beyond RAM. No large-scale capacity, latency SLA, distributed replication, ANN, SQL, joins,
 aggregation pipeline, encryption at rest or point-in-time recovery is claimed.
 
 That scan has a measured cost, not a guessed one ([OPERATIONS](docs/OPERATIONS.md#measured-throughput-and-latency)):
-on one x86-64 node, text search p50 went 102 ms → 494 ms → 1,013 ms as the corpus went
-2,000 → 10,000 → 20,000 records - about 50 µs per stored record - and a lone writer held
-~23 creates/s at 20,000 records, with 4 and 16 concurrent writers still topping out near
-20/s because writes serialize on one mutex. Restating it as a budget: up to a few thousand
-records, one node answers in well under a second; past ~10,000 a search is a second-scale call
-and the write ceiling is what limits you, not the disk.
+on one x86-64 node over HTTP with real fsync, at 20,000 records a create takes 1.7 ms `p50`,
+text search 36 ms and hybrid search 84 ms - about 2-4 µs per stored record per search. Writes
+still serialize on one mutex, and the scan still grows linearly, so past ~100,000 records an
+ANN index is the next step.
 
-Deletion/expiry is logical. History, receipts, snapshots and backups can retain old content. This
-is **not physical erasure**. Collection schemas cannot expire. Pagination rejects intervening
+Deletion/expiry is logical: history and receipts keep old content until an admin purges the
+deleted record (`POST admin/purge/`, `mdb purge`), which rewrites the journal without any
+revision of it. Backups taken before a purge still hold the data, and the filesystem may keep
+the replaced journal's blocks until they are reused. Collection schemas cannot expire. Pagination rejects intervening
 writes or changes in matching active records; restart the query after HTTP 409. No stable
 multi-request snapshot is promised.
 

@@ -290,7 +290,10 @@ something to click in the console and search before your own data arrives.
 - [ ] TLS (or `-allow-insecure-network` behind a trusted reverse proxy only) for any non-loopback bind
 - [ ] One principal per application; least-privilege roles; rotate by editing `principals.json`
 - [ ] `Idempotency-Key` header on every retried write — replays return the original receipt instead of duplicating
-- [ ] Backups: `memorydb -backup file` (checksummed snapshot), restore with `-restore`; test both before launch
+- [ ] Backups: run with `-backup-dir` and schedule `mdb backup` (online, no downtime), restore with `-restore`; test both before launch
+- [ ] Monitoring: scrape `/metrics` with an admin token; alert on `memorydb_storage_poisoned == 1`
+- [ ] Rate limiting: `-rate-limit N` per principal so one client cannot starve the rest
+- [ ] Erasure requests: delete, then `mdb purge ID` - and expire old backups, which purge cannot reach
 - [ ] Compaction: `memorydb -compact N` periodically — deletes are logical, the journal grows until compacted
-- [ ] Know the limits: 4 MiB requests, 32 MiB transactions, in-memory indexes rebuilt per write — keep datasets small
+- [ ] Know the limits: 4 MiB requests, 32 MiB transactions, everything in RAM, search is a linear scan (≈36 ms text at 20k records)
 - [ ] Not supported yet: clustering/replication, SQL, joins, disk encryption, point-in-time recovery; the engine is unaudited — do not store regulated data
