@@ -1,6 +1,6 @@
 {
   "name": "superb-memory",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Dependency-free Node client for the MemoryDB Go document and agent-memory database",
   "type": "module",
   "main": "index.mjs",

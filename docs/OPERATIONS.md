@@ -212,7 +212,7 @@ Footprint and recovery for that corpus: a 43,467,476-byte journal covering 40,37
 2.15 s from process start to the first successful `GET /api/v1/health/`. Paged reads that walk
 all 20,000 memories are transient and pushed resident memory to ~181 MB.
 
-**Since the incremental-index change (unreleased, after 0.2.7)** the numbers above are the old
+**Since the incremental-index change (0.2.8)** the numbers above are the old
 engine's. A write no longer re-validates and re-indexes the whole dataset, and search no longer
 re-tokenizes every record or deep-copies every match. Measured on 6 November 2026 on the same
 machine: HTTP over loopback, real fsync, memories with 64-dimension vectors, `p50` of 20

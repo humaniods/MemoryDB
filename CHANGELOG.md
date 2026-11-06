@@ -4,7 +4,7 @@ Behaviour changes go here because the GitHub Release notes are the fixed block t
 `.github/workflows/release.yml` writes for every tag, so they cannot say what changed.
 Evidence for each line lives in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
-## Unreleased
+## 0.2.8 — 6 November 2026
 
 - Faster: a write no longer costs the size of the database. Every batch used to copy the whole
   record map, re-validate every document of every collection and rebuild every equality index

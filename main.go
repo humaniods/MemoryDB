@@ -30,7 +30,7 @@ var consoleUI []byte
 
 // Overridable with -ldflags "-X main.version=..." so a release build can stamp the
 // tag it was cut from, and `-version` can tell the operator which binary they have.
-var version = "0.2.7"
+var version = "0.2.8"
 
 type Principal struct {
 	TokenHash string `json:"token_sha256"`

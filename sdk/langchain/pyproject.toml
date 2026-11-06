@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "memorydb-langchain"
-version = "0.2.7"
+version = "0.2.8"
 description = "LangChain chat-message history backed by the MemoryDB agent-memory engine"
 readme = "README.md"
 requires-python = ">=3.10"
