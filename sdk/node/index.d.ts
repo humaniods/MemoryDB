@@ -9,7 +9,14 @@ export interface MemoryDBOptions {
   timeout?: number;
 }
 
-export interface Record {
+/**
+ * One stored record. Named MemoryDBRecord rather than Record on purpose: an exported
+ * `interface Record` would shadow TypeScript's own `Record<KeyType, ValueType>`, and the
+ * published 0.2.6 declarations did exactly that - every TypeScript project that installed
+ * them failed to compile, because the file then used `Record<string, string>` meaning the
+ * interface above, which takes no type arguments.
+ */
+export interface MemoryDBRecord {
   id: string;
   kind: string;
   content: string;
@@ -31,27 +38,27 @@ export declare class MemoryDB {
   static fromURL(connectionString: string): MemoryDB;
   request(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<any>;
   health(): Promise<any>;
-  search(query: { text?: string; vector?: number[]; kind?: string; source?: string; embedding_model?: string; agent?: string; limit?: number }): Promise<{ results: { record: Record; score: number }[] }>;
-  ingest(payload: { source: string; messages: { role: string; content: string }[]; facts?: unknown[]; extract?: boolean; context?: string; tools?: unknown[] }): Promise<{ results: Record[] }>;
-  queueIngest(payload: object): Promise<Record>;
-  transaction(changes: { record: object; expected: number }[], idempotencyKey?: string): Promise<{ results: Record[] }>;
+  search(query: { text?: string; vector?: number[]; kind?: string; source?: string; embedding_model?: string; agent?: string; limit?: number }): Promise<{ results: { record: MemoryDBRecord; score: number }[] }>;
+  ingest(payload: { source: string; messages: { role: string; content: string }[]; facts?: unknown[]; extract?: boolean; context?: string; tools?: unknown[] }): Promise<{ results: MemoryDBRecord[] }>;
+  queueIngest(payload: object): Promise<MemoryDBRecord>;
+  transaction(changes: { record: object; expected: number }[], idempotencyKey?: string): Promise<{ results: MemoryDBRecord[] }>;
   memories: {
-    create(record: object): Promise<Record>;
-    list(opts?: { kind?: string; source?: string; q?: string; limit?: number }): Promise<{ results: { record: Record; score: number }[] }>;
-    get(pk: string): Promise<Record>;
-    history(pk: string): Promise<{ results: Record[] }>;
-    delete(pk: string, version: number): Promise<Record>;
+    create(record: object): Promise<MemoryDBRecord>;
+    list(opts?: { kind?: string; source?: string; q?: string; limit?: number }): Promise<{ results: { record: MemoryDBRecord; score: number }[] }>;
+    get(pk: string): Promise<MemoryDBRecord>;
+    history(pk: string): Promise<{ results: MemoryDBRecord[] }>;
+    delete(pk: string, version: number): Promise<MemoryDBRecord>;
   };
   collections: {
-    list(): Promise<Record[]>;
-    create(name: string, schema: object): Promise<Record>;
+    list(): Promise<MemoryDBRecord[]>;
+    create(name: string, schema: object): Promise<MemoryDBRecord>;
   };
   documents(name: string): {
-    create(data: object, idempotencyKey?: string): Promise<Record>;
-    get(pk: string): Promise<Record>;
-    query(q?: object): Promise<{ results: Record[]; total: number; plan: string; next_cursor?: string }>;
-    update(pk: string, opts: { version?: number; set?: object; unset?: string[] }): Promise<Record>;
-    delete(pk: string, version: number): Promise<Record>;
+    create(data: object, idempotencyKey?: string): Promise<MemoryDBRecord>;
+    get(pk: string): Promise<MemoryDBRecord>;
+    query(q?: object): Promise<{ results: MemoryDBRecord[]; total: number; plan: string; next_cursor?: string }>;
+    update(pk: string, opts: { version?: number; set?: object; unset?: string[] }): Promise<MemoryDBRecord>;
+    delete(pk: string, version: number): Promise<MemoryDBRecord>;
   };
 }
 

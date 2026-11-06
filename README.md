@@ -322,7 +322,9 @@ Everything published is verified from a clean virtualenv with no checkout on the
 and LangChain add-ons against real Django and `langchain-core`. The release assets, the ghcr image
 on both architectures and the checksum refusals are covered in
 [TEST_REPORT](docs/TEST_REPORT.md); the gap it found that still matters is that vector search is an
-exact scan, not ANN - everything else it listed is now closed, including the npm name
+exact scan, not ANN - now measured rather than asserted, ~50 µs per stored record and ~20-25 writes/s
+per node ([OPERATIONS](docs/OPERATIONS.md#measured-throughput-and-latency)) - everything else it
+listed is now closed, including the npm name
 `superb-memory`, which CI publishes through npm Trusted Publishing with no stored token (that took
 one human `npm publish` first, because a publisher can only be registered on a package that exists).
 
@@ -345,6 +347,14 @@ LSM/B-tree engine. Text/vector search scans the authorized data. Request bodies 
 4 MiB; transactions and compaction snapshots at 32 MiB. Compaction fails safely above its
 snapshot limit. No large-scale capacity, latency SLA, distributed replication, ANN, SQL, joins,
 aggregation pipeline, encryption at rest or point-in-time recovery is claimed.
+
+That scan has a measured cost, not a guessed one ([OPERATIONS](docs/OPERATIONS.md#measured-throughput-and-latency)):
+on one x86-64 node, text search p50 went 102 ms → 494 ms → 1,013 ms as the corpus went
+2,000 → 10,000 → 20,000 records - about 50 µs per stored record - and a lone writer held
+~23 creates/s at 20,000 records, with 4 and 16 concurrent writers still topping out near
+20/s because writes serialize on one mutex. Restating it as a budget: up to a few thousand
+records, one node answers in well under a second; past ~10,000 a search is a second-scale call
+and the write ceiling is what limits you, not the disk.
 
 Deletion/expiry is logical. History, receipts, snapshots and backups can retain old content. This
 is **not physical erasure**. Collection schemas cannot expire. Pagination rejects intervening

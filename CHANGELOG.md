@@ -4,6 +4,38 @@ Behaviour changes go here because the GitHub Release notes are the fixed block t
 `.github/workflows/release.yml` writes for every tag, so they cannot say what changed.
 Evidence for each line lives in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
+## 0.2.7 — 6 November 2026
+
+- Fixed: the TypeScript declarations in the npm package did not compile. `sdk/node/index.d.ts`
+  declared `export interface Record`, which shadows TypeScript's own global `Record<KeyType,
+  ValueType>` for the rest of that file, so its three `Record<string, …>` annotations were read as
+  the local interface given two type arguments it does not take. Installing `superb-memory@0.2.6`
+  and running `tsc` on a file that only says `import { MemoryDB } from 'superb-memory'` fails with
+  three `TS2315: Type 'Record' is not generic` errors - `--strict` on or off, the errors are in the
+  shipped file, not in the caller's code. The record interface is now `MemoryDBRecord`, which frees
+  the global name, and the map annotations are back to plain `Record<string, unknown>`. Nothing else
+  in the published surface keeps the old name, and it could never have been used: no reader of
+  `index.d.ts` has ever had a compiling build that imported `Record` from this package. No API, no
+  wire format and no runtime behaviour changes; `index.mjs` is untouched, and `node test.mjs` passes
+  against a live server.
+- Fixed: `sdk/node` shipped a `npm test` script pointing at `test.mjs`, but `files` omitted that
+  file, so the command failed with a module-not-found error inside an installed copy. `test.mjs` is
+  in the tarball now.
+- Documented: `sdk/django/README.md` showed `CACHES[...]["LOCATION"]` next to `SESSION_ENGINE`
+  without saying the session backend never reads `CACHES`. It takes its connection from the
+  `MEMORYDB_URL` Django setting, or the `MEMORYDB_URL` environment variable, and if neither is set
+  it raises `ValueError: pass a url with token=, a memorydb:// connection string, or set
+  MEMORYDB_URL` on the first session read rather than at startup. The settings snippet now carries
+  that line and the gotcha is spelled out.
+- New: the README and `docs/OPERATIONS.md` carry measured latency and throughput numbers for the
+  search path instead of only the caveat that it is an exact scan. Measured on the 0.2.6/0.2.7
+  engine, single node, loopback: text search p50 grows roughly linearly with the corpus
+  (~47 µs per stored record), and a lone writer's latency grows with it too, because every write
+  re-derives the BM25 statistics over the whole dataset under one mutex.
+- No server behaviour change: no status code, response shape or query semantic moves in this
+  release. Everything above is the npm package's type declarations, one packaging field, the
+  Django README and the performance documentation.
+
 ## 0.2.6 — 5 November 2026
 
 - **npm:** `superb-memory` is now a real npm package. `npm install superb-memory` then

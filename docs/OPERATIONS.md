@@ -110,3 +110,55 @@ Provider calls may repeat after a crash or retry, even when stored results dedup
   Do not erase corrupt frames or silently truncate complete checksum failures.
 - RAM/disk growth: monitor both, take backups, compact within the documented limit.
   There are no built-in capacity alarms or automated retention guarantees.
+
+## Measured throughput and latency
+
+The engine has no metrics endpoint, so these are the numbers to plan against. They were
+measured on 5 November 2026 against the published 0.2.6 binary (0.2.7 changes nothing in the
+server) on one x86-64 machine: AMD Ryzen 7 7735U, 16 logical CPUs, 30 GB RAM, AVX2, journal on the local
+filesystem, HTTP over loopback, one client, nothing else competing. Workload: memories with
+64-dimensional vectors and ~80-character content, plus a typed `benchdocs` collection of
+integer/string documents. Latency is `p50/p95` of 12-20 sequential requests with `limit=10`.
+
+Search cost is a scan of the authorized data, so it grows with the corpus:
+
+| memories + documents | text `p50/p95` | vector `p50/p95` | hybrid `p50/p95` | indexed filter on 20k documents |
+| --- | --- | --- | --- | --- |
+| 2,000 | 102 / 132 ms | 99 / 118 ms | 107 / 119 ms | 2.3 ms |
+| 5,000 | 332 / 369 ms | 321 / 452 ms | 255 / 318 ms | 5.1 ms |
+| 10,000 | 494 / 560 ms | 521 / 753 ms | 500 / 532 ms | 24.4 ms |
+| 20,000 | 1013 / 1045 ms | 1024 / 1149 ms | 1007 / 1092 ms | 72.3 ms |
+
+That is about 50 µs per stored record per search (the 5,000-row point measured high, at
+66 µs). Extrapolating the same constant, a 100,000-record corpus would answer a text query in
+roughly 5 seconds - extrapolation, not measurement.
+
+Throughput, at the 20,000-record corpus:
+
+| what | result |
+| --- | --- |
+| one writer | 44.4 ms `p50` per create → about 23 writes/s; the same writes cost 1.7 ms `p50` while the corpus was under 2,000 |
+| the whole 20,000-record seed, one writer | 380.6 s → 53 writes/s averaged over the growth from 0 to 20,000 |
+| 4 concurrent writers | 20 writes/s aggregate, 192 ms `p50` |
+| 16 concurrent writers | 21 writes/s aggregate, 803 ms `p50`, 873 ms worst |
+| 8 concurrent readers | 2.7 searches/s aggregate, 2,968 ms `p50` |
+| one reader while a writer hammers, same query | 2,265 ms `p50` against 1,115 ms idle |
+
+Concurrency buys almost nothing, because every write takes the single engine mutex to append to
+the journal, fsync, and re-derive the indexes and BM25 statistics for the whole dataset, and
+reads queue behind it. A writer in flight roughly doubles a reader's latency. Query shape
+matters too: at the same corpus, `renewal pricing` (two very common terms) took 1,115 ms while
+`invoice sla migration` took 523 ms, so high-frequency terms are the expensive case.
+Document filters are the exception - an indexed `tag` equality returning 207 of 20,000 documents
+took 66-72 ms, because those records are indexed rather than scanned.
+
+Footprint and recovery for that corpus: a 43,467,476-byte journal covering 40,374 transactions,
+86.5 MB resident immediately after replay (about 2 KB per stored record, indexes included), and
+2.15 s from process start to the first successful `GET /api/v1/health/`. Paged reads that walk
+all 20,000 memories are transient and pushed resident memory to ~181 MB.
+
+So: comfortable for one-node agent memory and small document sets up to a few thousand records
+with sub-second reads, and roughly 20-25 writes/s per node whatever the size. Past ~10,000
+records a search is a second-scale operation and past ~50,000 the scan is the reason to add an
+ANN index - see [the gap list in README](../README.md#storage-and-consistency-contract). None of
+this is a guarantee: there is no capacity alarm, no rate limiter, and no replication here.

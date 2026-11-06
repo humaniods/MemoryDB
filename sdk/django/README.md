@@ -16,6 +16,7 @@ CACHES = {"default": {
 }}
 
 SESSION_ENGINE = "memorydb_django.sessions"
+MEMORYDB_URL = "memorydb://TOKEN@127.0.0.1:8080"   # the session store reads this, not CACHES
 ```
 
 Then use Django's own API:
@@ -33,6 +34,12 @@ Details worth knowing:
 
 - Each cache key and each session is one MemoryDB document in the `django_cache` /
   `django_sessions` collection (typed, unique and indexed; created on first use).
+- The session engine has no `LOCATION` of its own: `CACHES` configures the cache only. Sessions
+  take their connection from the `MEMORYDB_URL` **Django setting**, or, if you do not set it, from
+  the `MEMORYDB_URL` **environment variable** (with `MEMORYDB_TOKEN` optional). Following the
+  snippet above but leaving out that one line is the usual way to meet
+  `ValueError: pass a url with token=, a memorydb:// connection string, or set MEMORYDB_URL` —
+  it is raised on the first session read, not at startup.
 - `timeout=` and `SESSION_COOKIE_AGE` are stored as the record's own `expires` field, so the
   server stops serving them at the deadline. No cleanup cron, and `clear_expired()` is a no-op.
 - Concurrent writers use optimistic versions and retry, so there are no row locks or deadlocks.
