@@ -35,13 +35,70 @@ at `/` and the memory Studio at `/studio/`, plus a pip package, a CLI, an MCP se
 Django/LangChain add-ons. `pip install superb-memory && mdb serve` is the whole setup;
 `mdb demo` fills it with a sample workspace through the same connector path your real data uses.
 
-**Status: experimental, single-node.** Working storage and application APIs, not a
-PostgreSQL/MongoDB replacement or full TencentDB/Hy-Memory parity. The exact supported scope and
-what is still missing are in [FEATURES](docs/FEATURES.md).
+**Status (0.2.8): single-node, ready for development and for small or internal production.**
+It ships with online backups, Prometheus metrics, per-client rate limiting and physical purge.
+At 20,000 records a create takes 1.7 ms and a search 36-84 ms. It is not a PostgreSQL/MongoDB
+replacement: there is no replication, and search is an exact scan. See
+[who it is for](#who-memorydb-is-perfect-for), and [FEATURES](docs/FEATURES.md) for the exact
+scope and what is still missing.
 
 <p align="center">
   <img src=".github/assets/studio.png" width="900" alt="Memory Studio showing a workspace's memories as chat, summary and fact records - Thar Solar moved to the growth plan, Rani Textiles renews in January, seats 85 - with the selected record's edit panel and its revision history beside it">
 </p>
+
+## Who MemoryDB is perfect for
+
+**Developers**
+
+- **Agent and LLM app builders** who want long-term memory for an agent without running Postgres,
+  pgvector and Redis side by side. It is one binary and one `pip install`, and the MCP server
+  plugs straight into Claude Code, Cursor or Codex.
+- **Python, Django and LangChain developers.** It gives you LangChain chat history, a Django cache
+  and session backend, and a Django-style query builder, with no new infrastructure.
+- **Developers building RAG or memory features** who need hybrid search (BM25 plus vectors) and
+  want to see and edit every memory in a UI (the Studio) instead of guessing what the agent
+  stored.
+- **Developers who must explain what an agent remembers.** Every fact quotes the message it came
+  from, and every edit keeps its revision history, so "why did the agent think that?" has an
+  answer.
+- **Hackathons, demos, side projects and internal tools,** and local-first setups on a laptop, an
+  edge box or a single VM.
+- **Backend developers who want an agent to read a table they already own.** `mdb sync` mirrors it
+  and rewrites only the rows that changed.
+
+**Users, teams and workloads**
+
+- One product or one team with **up to about 50,000 records**. The sweet spot is under 20,000,
+  where a create takes 1.7 ms and a search 36-84 ms.
+- Internal tools, support and sales copilots, CRM assistant memory, personal AI assistants and
+  coding-agent memory.
+- Workloads that can tolerate **a few minutes of downtime** for a restart or a restore.
+- Teams that must honour **deletion requests**: delete a record, then `mdb purge` erases every
+  revision of it from the journal.
+
+**Not a fit. Use Postgres + pgvector or a managed database instead if you need:**
+
+- 24x7 customer-facing uptime with failover or replicas. MemoryDB runs on one node.
+- More than about 100,000 records, or many clients writing at once. Writes go through one lock
+  and search scans every record.
+- Data larger than the machine's RAM, because everything is held in memory.
+- SQL, joins, reporting or analytics.
+- Regulated data that needs encryption at rest or an independently audited system.
+- Many tenants that each have their own admin. Backup, purge and metrics act on the whole server.
+- A native Windows build. Use WSL or Docker.
+
+**Running it in a small production setup**
+
+```sh
+./memorydb -data /var/lib/memorydb/memory.wal -addr 0.0.0.0:8080 \
+  -tls-cert cert.pem -tls-key key.pem \
+  -backup-dir /var/backups/memorydb -rate-limit 50 -worker
+```
+
+Then schedule `mdb backup` (for example hourly), copy the backups off the machine, and test a
+restore once. Scrape `/metrics` with an admin token and alert on
+`memorydb_storage_poisoned == 1`. Run `-compact` during a quiet window. The full checklist is in
+[OPERATIONS](docs/OPERATIONS.md).
 
 ## Get started with your coding agent
 
@@ -126,7 +183,11 @@ Use `--bin <path>`, `--from <archive>` or `--source <tree>` to run a binary you 
 - **Two UIs in the binary:** the console (collections, transactions, ingestion, jobs, graph
   explorer) and the memory Studio, both plain HTML the server serves itself.
 - **A checksummed WAL:** SHA256-framed events, fsync before publish, partial-tail recovery,
-  process lock, backup/restore and compaction.
+  process lock, backup/restore, and compaction at any size that fits in RAM.
+- **Operations built in:** online backups while the server keeps serving (`-backup-dir`,
+  `mdb backup`), Prometheus metrics at `/metrics`, a per-principal rate limiter
+  (`-rate-limit`, which answers `429` with `Retry-After`), and `mdb purge` to physically erase
+  deleted records.
 - **Clients for the stack you are in:** Python with a Django-style lazy query builder, a native
   Go client, a dependency-free Node client, the `mdb` CLI, an MCP server for agents, and Django
   cache/session and LangChain memory backends.
@@ -147,6 +208,10 @@ mdb memory history --id <record-id> # every revision, oldest first
 mdb ingest --file examples/call.json    # chat + evidence-linked facts
 mdb sync stripe --collection customers --key-field id --file examples/customers.json
 mdb sources                         # which connectors exist, their rows and last sync
+# admin and operations (backup needs the server started with -backup-dir):
+mdb backup                          # checksummed backup, no downtime
+mdb metrics                         # Prometheus metrics
+mdb purge <record-id>               # erase every revision of an already-deleted record
 ```
 
 Other ways to run the server, if you would rather not use pip:
@@ -260,6 +325,8 @@ the whole cycle through the Python client.
 - Atomic write batches (up to 256 changes), optimistic version checks, durable idempotency
   receipts, immutable revisions, logical deletion and expiry.
 - Checksummed WAL, partial-tail recovery, process lock, backup/restore and compaction.
+- Online backup over HTTP, Prometheus `/metrics`, per-principal rate limiting and physical
+  purge of deleted records.
 - Workspace-scoped tokens, reader/writer/admin roles, private/team/reader-list visibility.
 - BM25, model-separated exact vector cosine and reciprocal rank fusion.
 - Evidence-linked chat ingestion, optional LLM fact extraction, contextual fact replacement,
@@ -284,8 +351,10 @@ the whole cycle through the Python client.
   an archive that file does not name is refused. The three Python names are published to PyPI by
   GitHub Actions through Trusted Publishing, so no index credential is stored anywhere.
 - **Not audited.** This project has had no independent security review, no production load
-  qualification and no live-provider memory-quality evaluation. There is no encryption at rest
-  and no rate limiting.
+  qualification and no live-provider memory-quality evaluation. There is no encryption at rest.
+  Rate limiting is off unless you pass `-rate-limit`.
+- Backup, purge and `/metrics` need an admin token and act on the whole server. In a setup where
+  workspaces belong to different parties, give admin only to the operator.
 
 ## Documentation
 
@@ -295,7 +364,7 @@ the whole cycle through the Python client.
 | [API](docs/API.md) | Every HTTP route, request and response shape, status codes |
 | [CONNECTING](docs/CONNECTING.md) | Recipes per surface: website, agent via MCP, LangChain, Django, connectors |
 | [FEATURES](docs/FEATURES.md) | What works, what is partial, what is deliberately absent |
-| [OPERATIONS](docs/OPERATIONS.md) | Tokens, roles, backup/restore, compaction, jobs, TLS |
+| [OPERATIONS](docs/OPERATIONS.md) | Tokens, roles, online backup/restore, compaction, purge, monitoring, rate limits, TLS |
 | [TEST_REPORT](docs/TEST_REPORT.md) | What has actually been run and verified, with evidence |
 | [RESEARCH](docs/RESEARCH.md) / [PROVENANCE](docs/PROVENANCE.md) | Design notes, and the clean-room statement |
 
@@ -322,9 +391,9 @@ Everything published is verified from a clean virtualenv with no checkout on the
 and LangChain add-ons against real Django and `langchain-core`. The release assets, the ghcr image
 on both architectures and the checksum refusals are covered in
 [TEST_REPORT](docs/TEST_REPORT.md); the gap it found that still matters is that vector search is an
-exact scan, not ANN - now measured rather than asserted, ~50 µs per stored record and ~20-25 writes/s
-per node ([OPERATIONS](docs/OPERATIONS.md#measured-throughput-and-latency)) - everything else it
-listed is now closed, including the npm name
+exact scan, not ANN. Since 0.2.8 that scan costs about 2-4 µs per stored record, and a create
+takes 1.7 ms at 20,000 records ([OPERATIONS](docs/OPERATIONS.md#measured-throughput-and-latency)).
+Everything else it listed is now closed, including the npm name
 `superb-memory`, which CI publishes through npm Trusted Publishing with no stored token (that took
 one human `npm publish` first, because a publisher can only be registered on a package that exists).
 
