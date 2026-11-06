@@ -70,6 +70,9 @@ type Change struct {
 type Receipt struct {
 	Hash    string   `json:"hash"`
 	Records []Record `json:"records"`
+	// Purged counts records erased from this receipt by Purge. A retry of such a transaction
+	// is refused rather than answered with a partial result or re-executed.
+	Purged int `json:"purged,omitempty"`
 }
 type Event struct {
 	Format   int                `json:"format"`
@@ -188,7 +191,7 @@ func Open(path string) (*Engine, error) {
 		}
 		e.sequence = event.Sequence
 		if event.Key != "" {
-			e.receipts[event.Key] = Receipt{event.Hash, event.Records}
+			e.receipts[event.Key] = Receipt{Hash: event.Hash, Records: event.Records}
 		}
 		offset += 4 + int64(n) + sha256.Size
 	}
@@ -468,6 +471,9 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 			if receipt.Hash != hash {
 				return nil, ErrConflict
 			}
+			if receipt.Purged > 0 {
+				return nil, fmt.Errorf("%w: this transaction's records were purged", ErrMissing)
+			}
 			return cloneRecords(receipt.Records), nil
 		}
 	}
@@ -581,7 +587,7 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 	}
 	e.sequence = event.Sequence
 	if key != "" {
-		e.receipts[key] = Receipt{hash, cloneRecords(prepared)}
+		e.receipts[key] = Receipt{Hash: hash, Records: cloneRecords(prepared)}
 	}
 	return cloneRecords(prepared), nil
 }

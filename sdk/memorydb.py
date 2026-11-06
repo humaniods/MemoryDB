@@ -125,6 +125,31 @@ class MemoryDB:
         """
         return self.request("POST", "demo/", None)
 
+    def backup(self):
+        """Write a checksummed backup on the server while it keeps serving (admin).
+
+        The server must run with -backup-dir; returns {path, bytes, sha256, sequence}.
+        """
+        return self.request("POST", "admin/backup/", None)
+
+    def purge(self, ids):
+        """Erase every revision of already-deleted records from the journal (admin)."""
+        return self.request("POST", "admin/purge/", {"ids": list(ids)})
+
+    def metrics(self):
+        """Prometheus text exposition from GET /metrics (admin)."""
+        req = Request(self.url[: -len("api/v1/")] + "metrics",
+                      headers={"Authorization": "Bearer " + self.token}, method="GET")
+        try:
+            with urlopen(req, timeout=self.timeout) as response:
+                return response.read().decode()
+        except HTTPError as exc:
+            try:
+                message = json.load(exc).get("error", str(exc))
+            except (ValueError, AttributeError):
+                message = str(exc)
+            raise MemoryDBError(exc.code, message) from exc
+
     def request(self, method, path, body=None, headers=None):
         req = Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,
                       headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json", **(headers or {})}, method=method)

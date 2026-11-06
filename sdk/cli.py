@@ -293,6 +293,10 @@ def main(argv=None):
 
     p = sub.add_parser("sources"); p.add_argument("action", choices=["ls"], nargs="?", default="ls")
     p = sub.add_parser("demo", help="load the built-in sample workspace into the server")
+    sub.add_parser("backup", help="take a checksummed backup while the server keeps serving (admin, needs -backup-dir)")
+    p = sub.add_parser("purge", help="erase every revision of already-deleted records (admin)")
+    p.add_argument("ids", nargs="+")
+    sub.add_parser("metrics", help="print the Prometheus metrics (admin)")
 
     p = sub.add_parser("serve", help="install (if needed) and run the MemoryDB server")
     p.add_argument("--addr", default="127.0.0.1:8080")
@@ -367,6 +371,12 @@ def main(argv=None):
             emit(db.sources.all())
         elif args.cmd == "demo":
             emit(db.demo_seed())
+        elif args.cmd == "backup":
+            emit(db.backup())
+        elif args.cmd == "purge":
+            emit(db.purge(args.ids))
+        elif args.cmd == "metrics":
+            sys.stdout.write(db.metrics())
     except MemoryDBError as exc:
         sys.exit(f"mdb error [{exc.status}]: {exc}")
     return 0

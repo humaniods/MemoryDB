@@ -45,6 +45,7 @@ type Server struct {
 	workspace  string
 	role       string
 	principals []Principal
+	ops        *opsState
 }
 
 func respond(w http.ResponseWriter, status int, v any) {
@@ -105,6 +106,20 @@ func (s *Server) authenticate(r *http.Request) (Principal, bool) {
 	return Principal{}, false
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.ops == nil || s.ops.metrics == nil {
+		s.serve(w, r)
+		return
+	}
+	start := time.Now()
+	rec := &statusRecorder{ResponseWriter: w}
+	s.serve(rec, r)
+	status := rec.status
+	if status == 0 {
+		status = 200
+	}
+	s.ops.metrics.observe(routeLabel(r.URL.Path), status, time.Since(start))
+}
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -121,6 +136,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		failure(w, 401, errors.New("valid bearer token required"))
 		return
+	}
+	if s.ops != nil && s.ops.limiter != nil && r.URL.Path != "/metrics" {
+		if ok, wait := s.ops.limiter.allow(p.Workspace + "\x00" + p.User); !ok {
+			if s.ops.metrics != nil {
+				s.ops.metrics.mu.Lock()
+				s.ops.metrics.rateLimited++
+				s.ops.metrics.mu.Unlock()
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+			failure(w, 429, errors.New("rate limit exceeded for this principal"))
+			return
+		}
 	}
 	scoped := *s
 	scoped.user = p.User
@@ -201,6 +228,9 @@ func (s *Server) commit(w http.ResponseWriter, r *http.Request, rec Record, expe
 }
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	if s.opsRoutes(w, r) {
+		return
+	}
 	if path == "/api/v1/health/" && r.Method == "GET" {
 		respond(w, 200, map[string]any{"status": "ok", "workspace": s.workspace, "user": s.user, "role": s.role, "version": version, "sequence": s.engine.Sequence()})
 		return
@@ -506,6 +536,9 @@ func main() {
 	worker := flag.Bool("worker", false, "run durable ingestion jobs")
 	verify := flag.Bool("verify", false, "verify journal and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	backupDir := flag.String("backup-dir", "", "directory for online backups taken with POST /api/v1/admin/backup/")
+	rateLimit := flag.Float64("rate-limit", 0, "requests per second allowed per principal; 0 turns limiting off")
+	rateBurst := flag.Float64("rate-burst", 0, "requests a principal may make at once (default 2x -rate-limit)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -564,7 +597,19 @@ func main() {
 	if (ip == nil || !ip.IsLoopback()) && !tls && !*insecure {
 		log.Fatal("non-loopback requires TLS or explicit trusted-proxy flag")
 	}
-	s := &Server{engine: e, token: token, user: "local-user", workspace: "default", role: "admin", principals: ps}
+	if *backupDir != "" {
+		if fi, err := os.Stat(*backupDir); err != nil || !fi.IsDir() {
+			log.Fatal("-backup-dir must be an existing directory")
+		}
+	}
+	if *rateLimit < 0 || *rateBurst < 0 {
+		log.Fatal("-rate-limit and -rate-burst must be nonnegative")
+	}
+	ops := &opsState{backupDir: *backupDir, metrics: newMetrics(), started: time.Now()}
+	if *rateLimit > 0 {
+		ops.limiter = newLimiter(*rateLimit, *rateBurst)
+	}
+	s := &Server{engine: e, token: token, user: "local-user", workspace: "default", role: "admin", principals: ps, ops: ops}
 	server := &http.Server{Addr: *addr, Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
