@@ -165,44 +165,15 @@ func validateCollections(all map[string][]Record, now time.Time) error {
 		if !ok {
 			return fmt.Errorf("collection %s does not exist", r.Collection)
 		}
-		for path, field := range schema.Fields {
-			v, ok := valueAt(r.Data, path)
-			if !ok {
-				if field.Required {
-					return fmt.Errorf("required field missing: %s", path)
-				}
-				continue
-			}
-			if !typeOK(v, field.Type) {
-				return fmt.Errorf("invalid type for field %s", path)
-			}
-		}
-		if schema.Strict {
-			for k := range r.Data {
-				declared := false
-				for path := range schema.Fields {
-					if strings.Split(path, ".")[0] == k {
-						declared = true
-						break
-					}
-				}
-				if !declared {
-					return fmt.Errorf("undeclared field: %s", k)
-				}
-			}
+		if err := checkDocument(r, schema); err != nil {
+			return err
 		}
 		for _, path := range schema.Unique {
 			v, ok := valueAt(r.Data, path)
 			if !ok || v == nil {
 				continue
 			}
-			b, _ := json.Marshal(v)
-			canonical := string(b)
-			if n, ok := number(v); ok {
-				canonical = "number:" + n.RatString()
-			} else if text, isText := v.(string); isText && schema.Fields[path].Casefold {
-				canonical = "fold:" + strings.ToLower(text)
-			}
+			canonical := uniqueValue(v, schema.Fields[path])
 			uk := key + "\x00" + path
 			if unique[uk] == nil {
 				unique[uk] = map[string]bool{}
@@ -211,6 +182,37 @@ func validateCollections(all map[string][]Record, now time.Time) error {
 				return fmt.Errorf("%w: unique field %s", ErrConflict, path)
 			}
 			unique[uk][canonical] = true
+		}
+	}
+	return nil
+}
+
+// checkDocument enforces a schema's required fields, field types and strictness on one row.
+func checkDocument(r Record, schema Schema) error {
+	for path, field := range schema.Fields {
+		v, ok := valueAt(r.Data, path)
+		if !ok {
+			if field.Required {
+				return fmt.Errorf("required field missing: %s", path)
+			}
+			continue
+		}
+		if !typeOK(v, field.Type) {
+			return fmt.Errorf("invalid type for field %s", path)
+		}
+	}
+	if schema.Strict {
+		for k := range r.Data {
+			declared := false
+			for path := range schema.Fields {
+				if strings.Split(path, ".")[0] == k {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return fmt.Errorf("undeclared field: %s", k)
+			}
 		}
 	}
 	return nil
@@ -550,7 +552,7 @@ func (e *Engine) Documents(user, workspace, collection string, q DocumentQuery) 
 		if p.Op == "eq" {
 			if idx, ok := e.indexes[workspace+"\x00"+collection+"\x00"+p.Field]; ok {
 				candidates = map[string]bool{}
-				for _, id := range idx[indexValue(p.Value)] {
+				for id := range idx[indexValue(p.Value)] {
 					candidates[id] = true
 				}
 				page.Plan = "equality index: " + p.Field

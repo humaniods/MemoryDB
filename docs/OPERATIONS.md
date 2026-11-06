@@ -157,6 +157,22 @@ Footprint and recovery for that corpus: a 43,467,476-byte journal covering 40,37
 2.15 s from process start to the first successful `GET /api/v1/health/`. Paged reads that walk
 all 20,000 memories are transient and pushed resident memory to ~181 MB.
 
+**Since the incremental-index change (unreleased, after 0.2.7)** the numbers above are the old
+engine's. A write no longer re-validates and re-indexes the whole dataset, and search no longer
+re-tokenizes every record or deep-copies every match. Measured on 6 November 2026 on the same
+machine: HTTP over loopback, real fsync, memories with 64-dimension vectors, `p50` of 20
+sequential requests, old and new binaries built from the same tree:
+
+| records | create (old → new) | text search (old → new) | hybrid search (old → new) |
+| --- | --- | --- | --- |
+| 2,000 | 3.1 → 1.6 ms | 111 → 5.3 ms | 123 → 9.6 ms |
+| 20,000 | 26.9 → 1.7 ms | 726 → 36 ms | 1,143 → 84 ms |
+
+A write is now bounded by fsync rather than by corpus size. Search is still an exact scan
+(about 2 µs per record for text and 4 µs for hybrid at 20,000), so it still grows linearly,
+and an ANN index is still the next step past roughly 100,000 records. The concurrency
+limits are unchanged: the engine still serializes writes behind one mutex.
+
 So: comfortable for one-node agent memory and small document sets up to a few thousand records
 with sub-second reads, and roughly 20-25 writes/s per node whatever the size. Past ~10,000
 records a search is a second-scale operation and past ~50,000 the scan is the reason to add an

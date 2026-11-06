@@ -53,7 +53,10 @@ type Engine struct {
 	path       string
 	records    map[string][]Record
 	receipts   map[string]Receipt
-	indexes    map[string]map[string][]string
+	schemas    map[string]Schema
+	indexes    map[string]map[string]idSet
+	unique     map[string]map[string]idSet
+	terms      map[string]termStats
 	poisoned   bool
 	closed     bool
 	sequence   uint64
@@ -460,10 +463,24 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 			return cloneRecords(receipt.Records), nil
 		}
 	}
-	candidate := make(map[string][]Record, len(e.records))
-	for k, v := range e.records {
-		candidate[k] = v
-	}
+	// The batch is applied to e.records in place, under the write lock, and undone if anything
+	// fails before the journal frame is durable. prior holds each touched id's history as it
+	// was (nil for a new id), which is also what the indexes are told to forget on success.
+	prior := map[string][]Record{}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		for id, h := range prior {
+			if h == nil {
+				delete(e.records, id)
+			} else {
+				e.records[id] = h
+			}
+		}
+	}()
+	candidate := e.records
 	now := time.Now().UTC()
 	if changes, err = e.expandAlter(changes, now); err != nil {
 		return nil, err
@@ -505,7 +522,9 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 		}
 		r.Version = version + 1
 		r.Created = now
-		nh := append([]Record{}, h...)
+		prior[r.ID] = h
+		nh := make([]Record, len(h), len(h)+1)
+		copy(nh, h)
 		candidate[r.ID] = append(nh, r)
 		prepared = append(prepared, r)
 	}
@@ -527,15 +546,31 @@ func (e *Engine) batchLocked(changes []Change, key string) ([]Record, error) {
 			}
 		}
 	}
-	if err = validateCollections(candidate, now); err != nil {
+	if err = e.validateBatch(prepared, touched, now); err != nil {
 		return nil, err
 	}
 	event := Event{Format: 2, Records: prepared, Key: key, Hash: hash, Sequence: e.sequence + 1}
 	if err = e.appendEvent(event); err != nil {
 		return nil, err
 	}
-	e.records = candidate
-	e.rebuildIndexes()
+	committed = true
+	schemaChanged := false
+	for _, r := range prepared {
+		if r.Kind == "collection" {
+			schemaChanged = true
+			break
+		}
+	}
+	if schemaChanged {
+		e.rebuildIndexes()
+	} else {
+		for _, r := range prepared {
+			if h := prior[r.ID]; len(h) > 0 {
+				e.indexRecord(r.ID, h[len(h)-1], false)
+			}
+			e.indexRecord(r.ID, r, true)
+		}
+	}
 	e.sequence = event.Sequence
 	if key != "" {
 		e.receipts[key] = Receipt{hash, cloneRecords(prepared)}
@@ -694,24 +729,36 @@ func (e *Engine) Search(q Query) []Hit {
 	defer e.mu.RUnlock()
 	out := []Hit{}
 	now := time.Now()
-	docs := []Record{}
-	terms := [][]string{}
+	qt := tokens(q.Text)
+	queryTerms := []string{}
+	for _, t := range qt {
+		if !contains(queryTerms, t) {
+			queryTerms = append(queryTerms, t)
+		}
+	}
+	// Candidates are referenced in place rather than copied: the read lock keeps the
+	// histories still, and only the returned page is cloned.
+	docs := []*Record{}
+	terms := []termStats{}
 	df := map[string]int{}
 	total := 0
 	for _, h := range e.records {
-		r := h[len(h)-1]
-		if !inScope(r, q, now) {
+		r := &h[len(h)-1]
+		if !inScope(*r, q, now) {
 			continue
 		}
+		st, ok := e.terms[r.ID]
+		if !ok {
+			st = statsOf(r.Content)
+		}
 		docs = append(docs, r)
-		ts := tokens(r.Content)
-		terms = append(terms, ts)
-		total += len(ts)
-		seen := map[string]bool{}
-		for _, t := range ts {
-			if !seen[t] {
+		terms = append(terms, st)
+		total += st.length
+		// Only the query's own terms ever reach the score, so only their document
+		// frequencies are counted.
+		for _, t := range queryTerms {
+			if st.counts[t] > 0 {
 				df[t]++
-				seen[t] = true
 			}
 		}
 	}
@@ -723,18 +770,19 @@ func (e *Engine) Search(q Query) []Hit {
 	if avg == 0 {
 		avg = 1
 	}
-	qt := tokens(q.Text)
-	lexical := []Hit{}
-	semantic := []Hit{}
+	type ranked struct {
+		doc   int
+		score float64
+	}
+	lexical := []ranked{}
+	semantic := []ranked{}
+	fused := map[int]float64{}
 	for i, r := range docs {
 		if q.Text == "" && len(q.Vector) == 0 {
-			out = append(out, Hit{clone(r), 0})
+			fused[i] = 0
 			continue
 		}
-		counts := map[string]int{}
-		for _, t := range terms[i] {
-			counts[t]++
-		}
+		counts := terms[i].counts
 		score := 0.0
 		for _, t := range qt {
 			tf := float64(counts[t])
@@ -742,48 +790,53 @@ func (e *Engine) Search(q Query) []Hit {
 				continue
 			}
 			idf := math.Log(1 + (float64(n-df[t])+0.5)/(float64(df[t])+0.5))
-			score += idf * (tf * 2.2) / (tf + 1.2*(0.25+0.75*float64(len(terms[i]))/avg))
+			score += idf * (tf * 2.2) / (tf + 1.2*(0.25+0.75*float64(terms[i].length)/avg))
 		}
 		if score > 0 {
-			lexical = append(lexical, Hit{r, score})
+			lexical = append(lexical, ranked{i, score})
 		}
 		c := cosine(q.Vector, r.Vector)
 		if q.EmbeddingModel != r.EmbeddingModel {
 			c = 0
 		}
 		if c > 0 {
-			semantic = append(semantic, Hit{r, c})
+			semantic = append(semantic, ranked{i, c})
 		}
 	}
-	order := func(h []Hit) {
+	order := func(h []ranked) {
 		sort.Slice(h, func(i, j int) bool {
-			if h[i].Score == h[j].Score {
-				return h[i].Record.ID < h[j].Record.ID
+			if h[i].score == h[j].score {
+				return docs[h[i].doc].ID < docs[h[j].doc].ID
 			}
-			return h[i].Score > h[j].Score
+			return h[i].score > h[j].score
 		})
 	}
 	order(lexical)
 	order(semantic)
-	scores := map[string]float64{}
-	records := map[string]Record{}
-	for _, list := range [][]Hit{lexical, semantic} {
+	for _, list := range [][]ranked{lexical, semantic} {
 		for rank, h := range list {
-			scores[h.Record.ID] += 1 / float64(61+rank)
-			records[h.Record.ID] = h.Record
+			fused[h.doc] += 1 / float64(61+rank)
 		}
 	}
-	for id, score := range scores {
-		out = append(out, Hit{clone(records[id]), score})
+	// Ordering compares only score, timestamp and ID, so it runs on positions and the
+	// records themselves are copied once, for the page that is returned.
+	type candidate struct {
+		doc   int
+		score float64
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Score == out[j].Score {
-			if out[i].Record.Created.Equal(out[j].Record.Created) {
-				return out[i].Record.ID < out[j].Record.ID
+	page := make([]candidate, 0, len(fused))
+	for i, score := range fused {
+		page = append(page, candidate{i, score})
+	}
+	sort.Slice(page, func(i, j int) bool {
+		a, b := docs[page[i].doc], docs[page[j].doc]
+		if page[i].score == page[j].score {
+			if a.Created.Equal(b.Created) {
+				return a.ID < b.ID
 			}
-			return out[i].Record.Created.After(out[j].Record.Created)
+			return a.Created.After(b.Created)
 		}
-		return out[i].Score > out[j].Score
+		return page[i].score > page[j].score
 	})
 	limit := q.Limit
 	if limit <= 0 {
@@ -792,8 +845,11 @@ func (e *Engine) Search(q Query) []Hit {
 	if limit > 500 {
 		limit = 500
 	}
-	if len(out) > limit {
-		out = out[:limit]
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	for _, c := range page {
+		out = append(out, Hit{clone(*docs[c.doc]), c.score})
 	}
 	return out
 }

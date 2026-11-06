@@ -4,6 +4,28 @@ Behaviour changes go here because the GitHub Release notes are the fixed block t
 `.github/workflows/release.yml` writes for every tag, so they cannot say what changed.
 Evidence for each line lives in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
+## Unreleased
+
+- Faster: a write no longer costs the size of the database. Every batch used to copy the whole
+  record map, re-validate every document of every collection and rebuild every equality index
+  before it could commit, so a single create took 27 ms at 20,000 records and grew linearly. A
+  batch is now applied in place under the write lock and undone if validation or the journal
+  write fails; it validates only the documents it wrote, against a cached schema and an index of
+  unique-key holders, and updates only those rows' index entries. A batch that writes a
+  collection still re-checks and rebuilds everything, as before. Over HTTP with real fsync on the
+  same machine, a create at 20,000 records went from 26.9 to 1.7 ms `p50` and now stays flat as
+  the corpus grows.
+- Faster: search tokenizes each record once, when it is written, instead of on every query, counts
+  document frequency only for the query's own terms, and ranks on positions so only the returned
+  page is deep-copied - it used to JSON-round-trip every match before applying `limit`. Over HTTP
+  at 20,000 records, text search went from 726 to 36 ms `p50` and hybrid search from 1,143 to
+  84 ms. Results are identical: 300 random queries returned the same hits, order and scores from
+  the old and new code. Search is still an exact scan, so it still grows linearly with the corpus.
+- New: `bench_test.go` (`go test -run '^$' -bench .`) measures write and search cost at 2,000,
+  10,000 and 20,000 records, and `indexes_test.go` checks that the incremental index state always
+  equals a full rebuild, plus unique swaps within one batch, expired and deleted unique holders,
+  and rollback after a rejected batch or a failed journal write.
+
 ## 0.2.7 — 6 November 2026
 
 - Fixed: the TypeScript declarations in the npm package did not compile. `sdk/node/index.d.ts`
